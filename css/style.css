@@ -1,6 +1,7 @@
 :root {
-  --bg: #ffffff;
-  --box: #f6f8fa;
+  /* "paper white": reads as white until it sits next to true #fff/#000 */
+  --bg: #fafaf7;
+  --box: #ffffff;
   --ink: #14181d;
   --ink-2: #59626d;
   --ink-3: #99a1ab;
