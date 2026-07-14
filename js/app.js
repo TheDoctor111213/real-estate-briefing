@@ -52,6 +52,7 @@ const state = {
   groupBy: "section",
   mapTypeFilter: null, // null = all; otherwise a Set of dealTypes
   controlsDate: null,  // filters reset when the viewed day changes
+  rateChart: "curve",  // "curve" | "forward"
 };
 
 const $ = (id) => document.getElementById(id);
@@ -846,7 +847,7 @@ function renderRateStrip() {
   }
 }
 
-function rateTile(label, value, sub) {
+function rateTile(label, value, sub, prior) {
   const div = document.createElement("div");
   div.className = "rate-tile";
   const l = document.createElement("div");
@@ -856,7 +857,17 @@ function rateTile(label, value, sub) {
   v.className = "rt-value";
   v.textContent = pct(value);
   div.append(l, v);
-  if (sub) {
+
+  // 1-day change — the standard rates-screen window
+  if (value != null && prior != null && prior !== 0) {
+    const bp = (value - prior) * 100;
+    const pc = (value - prior) / prior * 100;
+    const chg = document.createElement("div");
+    chg.className = "rt-chg " + (bp >= 0 ? "up" : "down");
+    const arrow = bp >= 0 ? "▲" : "▼";
+    chg.innerHTML = `${arrow} ${Math.abs(bp).toFixed(1)} bp <span class="rt-pct">(${pc >= 0 ? "+" : ""}${pc.toFixed(1)}%) 1d</span>`;
+    div.appendChild(chg);
+  } else if (sub) {
     const s = document.createElement("div");
     s.className = "rt-sub";
     s.textContent = sub;
@@ -877,22 +888,41 @@ function renderRates() {
     return;
   }
 
-  // headline tiles
+  // headline tiles — 5Y / 10Y / 30Y / SOFR, matching the masthead order
   wrap.appendChild(sectionHead("Key Rates"));
   const tiles = document.createElement("div");
   tiles.className = "rate-tiles quads";
-  tiles.appendChild(rateTile("SOFR", r.sofr?.rate, "overnight, " + (r.sofr?.date || "")));
-  tiles.appendChild(rateTile("5-Year", r.treasury["5Y"], "treasury"));
-  tiles.appendChild(rateTile("10-Year", r.treasury["10Y"], "treasury"));
-  tiles.appendChild(rateTile("30-Year", r.treasury["30Y"], "treasury"));
+  const tp = r.treasuryPrior || {};
+  tiles.appendChild(rateTile("5-Year", r.treasury["5Y"], "treasury", tp["5Y"]));
+  tiles.appendChild(rateTile("10-Year", r.treasury["10Y"], "treasury", tp["10Y"]));
+  tiles.appendChild(rateTile("30-Year", r.treasury["30Y"], "treasury", tp["30Y"]));
+  tiles.appendChild(rateTile("SOFR", r.sofr?.rate, "overnight", r.sofr?.prior));
   wrap.appendChild(tiles);
 
-  // yield curve
-  wrap.appendChild(sectionHead("Treasury Yield Curve"));
+  // chart band with a curve/forward toggle (one chart at a time keeps the page
+  // to a single phone screen)
+  const head = document.createElement("div");
+  head.className = "chart-head";
+  const title = sectionHead(state.rateChart === "forward" ? "Implied Forward Path" : "Treasury Yield Curve");
+  title.style.margin = "0";
+  head.appendChild(title);
+  const toggle = document.createElement("div");
+  toggle.className = "map-toggle";
+  for (const [mode, label] of [["curve", "Curve"], ["forward", "Forward"]]) {
+    const b = document.createElement("button");
+    b.textContent = label;
+    b.className = state.rateChart === mode ? "on" : "";
+    b.addEventListener("click", () => { state.rateChart = mode; renderRates(); });
+    toggle.appendChild(b);
+  }
+  head.appendChild(toggle);
+  wrap.appendChild(head);
+
   const chart = document.createElement("div");
   chart.className = "curve-wrap";
-  chart.appendChild(buildCurveSvg(r.treasury));
+  chart.appendChild(state.rateChart === "forward" ? buildForwardSvg(r.forward || []) : buildCurveSvg(r.treasury));
   wrap.appendChild(chart);
+
 
   // SOFR averages
   const a = r.sofrAverages || {};
@@ -906,7 +936,9 @@ function renderRates() {
 
   const note = document.createElement("p");
   note.className = "rates-note";
-  note.textContent = `Treasury par yield curve as of ${r.curveDate}; SOFR published by the New York Fed (${r.sofr?.date}). Updated with each pipeline run.`;
+  note.textContent = state.rateChart === "forward"
+    ? "Forward path is bootstrapped from today's Treasury curve — the free equivalent of the futures-based SOFR forward curve (licensed data). A directional modeling guide, not a quote."
+    : `Treasury par yield curve as of ${r.curveDate}; SOFR published by the New York Fed (${r.sofr?.date}). Changes are vs the prior business day.`;
   wrap.appendChild(note);
 }
 
@@ -971,6 +1003,69 @@ function buildCurveSvg(t) {
     const hit = put("circle", { cx: xs(p.months), cy: ys(p.rate), r: 13 * k, class: "cv-hit" });
     const title = document.createElementNS("http://www.w3.org/2000/svg", "title");
     title.textContent = `${p.label}: ${p.rate.toFixed(2)}%`;
+    hit.appendChild(title);
+  }
+
+  return svg;
+}
+
+function buildForwardSvg(fwd) {
+  const pts = (fwd || []).filter((p) => typeof p.rate === "number");
+  if (pts.length < 2) {
+    const p = document.createElement("p");
+    p.style.cssText = "font-style:italic;color:var(--ink-2);padding:26px 10px";
+    p.textContent = "Forward path unavailable right now.";
+    return p;
+  }
+
+  const mobile = matchMedia("(max-width: 700px)").matches;
+  const k = mobile ? 1.9 : 1;
+  const W = 680, H = mobile ? 560 : 320;
+  const padL = 46 * (mobile ? 1.5 : 1), padR = 26, padT = 24 * k, padB = 32 * k;
+  const fs = { axis: 10 * k, value: 11 * k };
+  const tMax = Math.max(...pts.map((p) => p.t));
+  const xs = (t) => padL + (t / tMax) * (W - padL - padR);
+  const rates = pts.map((p) => p.rate);
+  const yMin = Math.floor(Math.min(...rates) * 4) / 4 - 0.25;
+  const yMax = Math.ceil(Math.max(...rates) * 4) / 4 + 0.25;
+  const ys = (r) => padT + (yMax - r) / (yMax - yMin) * (H - padT - padB);
+
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  svg.setAttribute("role", "img");
+  svg.setAttribute("aria-label", "Implied forward short-rate path: " + pts.map((p) => `${p.t ? p.t + "Y" : "now"} ${p.rate}%`).join(", "));
+  const put = (tag, attrs, text) => {
+    const el = document.createElementNS("http://www.w3.org/2000/svg", tag);
+    for (const [key, v] of Object.entries(attrs)) el.setAttribute(key, v);
+    if (text != null) el.textContent = text;
+    svg.appendChild(el);
+    return el;
+  };
+
+  for (let g = Math.ceil(yMin * 4) / 4; g <= yMax + 0.001; g += 0.25) {
+    const major = Math.round(g * 100) % 50 === 0;
+    put("line", { x1: padL, x2: W - padR, y1: ys(g), y2: ys(g), class: major ? "cv-grid" : "cv-grid minor" });
+    put("text", { x: padL - 8, y: ys(g) + fs.axis * 0.34, class: "cv-ylabel", "text-anchor": "end", "font-size": fs.axis }, g.toFixed(2));
+  }
+
+  for (const p of pts) {
+    put("text", { x: xs(p.t), y: H - 10, class: "cv-xlabel", "text-anchor": "middle", "font-size": fs.axis }, p.t === 0 ? "Now" : `+${p.t}Y`);
+  }
+
+  // stepped path — forward rates hold across each segment, which mirrors how
+  // a draw schedule models a rate assumption per period
+  let d = `M${xs(pts[0].t).toFixed(1)},${ys(pts[0].rate).toFixed(1)}`;
+  for (let i = 1; i < pts.length; i++) {
+    d += ` L${xs(pts[i].t).toFixed(1)},${ys(pts[i - 1].rate).toFixed(1)} L${xs(pts[i].t).toFixed(1)},${ys(pts[i].rate).toFixed(1)}`;
+  }
+  put("path", { d, class: "cv-line", "stroke-width": 2 * k });
+
+  for (const p of pts) {
+    put("circle", { cx: xs(p.t), cy: ys(p.rate), r: 4 * k, class: "cv-dot key", "stroke-width": 2 * k });
+    put("text", { x: xs(p.t), y: ys(p.rate) - 11 * k, class: "cv-vlabel", "text-anchor": "middle" , "font-size": fs.value }, p.rate.toFixed(2));
+    const hit = put("circle", { cx: xs(p.t), cy: ys(p.rate), r: 13 * k, class: "cv-hit" });
+    const title = document.createElementNS("http://www.w3.org/2000/svg", "title");
+    title.textContent = `${p.t === 0 ? "Now" : "+" + p.t + "Y"}: ${p.rate.toFixed(2)}%`;
     hit.appendChild(title);
   }
 
