@@ -794,10 +794,24 @@ async function renderHistory() {
 const TENOR_MONTHS = { "1M": 1, "2M": 2, "3M": 3, "4M": 4, "6M": 6, "1Y": 12, "2Y": 24, "3Y": 36, "5Y": 60, "7Y": 84, "10Y": 120, "20Y": 240, "30Y": 360 };
 
 async function loadRates() {
+  // live proxy first (fetches treasury.gov + NY Fed on demand); table row as fallback
   try {
-    const rows = await sb("rates?select=data&order=date.desc&limit=1");
-    state.rates = rows[0]?.data ?? null;
-  } catch { state.rates = null; }
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/rates-live`, {
+      headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` },
+    });
+    if (!res.ok) throw new Error(String(res.status));
+    const live = await res.json();
+    if (live?.treasury && Object.keys(live.treasury).length) {
+      state.rates = live;
+    } else {
+      throw new Error("empty");
+    }
+  } catch {
+    try {
+      const rows = await sb("rates?select=data&order=date.desc&limit=1");
+      state.rates = rows[0]?.data ?? null;
+    } catch { state.rates = null; }
+  }
   renderRateStrip();
   if (!$("view-rates").hidden) renderRates();
 }
