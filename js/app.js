@@ -806,6 +806,7 @@ async function loadRates() {
   // live proxy first (fetches treasury.gov + NY Fed on demand); table row as fallback
   try {
     const res = await fetch(`${SUPABASE_URL}/functions/v1/rates-live`, {
+      cache: "no-store", // the function keeps its own 10-min cache; always ask it
       headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` },
     });
     if (!res.ok) throw new Error(String(res.status));
@@ -980,7 +981,7 @@ function renderRates() {
   const note = document.createElement("p");
   note.className = "rates-note";
   note.textContent = state.rateChart === "forward"
-    ? "Forward path is bootstrapped from today's Treasury curve — the free equivalent of the futures-based SOFR forward curve (licensed data). A directional modeling guide, not a quote."
+    ? "Implied forward path from today's T-bill/note yields (monthly to 180d, then 1Y). Short bills track the expected Fed path closely — typically within ~10–30bp of the OIS/futures curve, which is licensed data. A modeling guide, not a quote."
     : state.rateChart === "history"
     ? "Daily official prints: Treasury par yields (treasury.gov) and SOFR (New York Fed). Tap the highlighted pane again to return to the yield curve."
     : `Treasury par yield curve as of ${r.curveDate}; SOFR published by the New York Fed (${r.sofr?.date}). Changes are vs the prior business day.`;
@@ -1054,8 +1055,14 @@ function buildCurveSvg(t) {
   return svg;
 }
 
+function fwdLabel(m) {
+  if (m === 0) return "Now";
+  if (m < 12) return `+${m * 30}d`;
+  return m === 12 ? "+1Y" : `+${m / 12}Y`;
+}
+
 function buildForwardSvg(fwd) {
-  const pts = (fwd || []).filter((p) => typeof p.rate === "number");
+  const pts = (fwd || []).filter((p) => typeof p.rate === "number").map((p) => ({ m: p.m ?? (p.t || 0) * 12, rate: p.rate }));
   if (pts.length < 2) {
     const p = document.createElement("p");
     p.style.cssText = "font-style:italic;color:var(--ink-2);padding:26px 10px";
@@ -1068,8 +1075,8 @@ function buildForwardSvg(fwd) {
   const W = 680, H = mobile ? 560 : 320;
   const padL = 46 * (mobile ? 1.5 : 1), padR = 26, padT = 24 * k, padB = 32 * k;
   const fs = { axis: 10 * k, value: 11 * k };
-  const tMax = Math.max(...pts.map((p) => p.t));
-  const xs = (t) => padL + (t / tMax) * (W - padL - padR);
+  const tMax = Math.max(...pts.map((p) => p.m));
+  const xs = (m) => padL + (m / tMax) * (W - padL - padR);
   const rates = pts.map((p) => p.rate);
   const yMin = Math.floor(Math.min(...rates) * 4) / 4 - 0.25;
   const yMax = Math.ceil(Math.max(...rates) * 4) / 4 + 0.25;
@@ -1078,7 +1085,7 @@ function buildForwardSvg(fwd) {
   const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
   svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
   svg.setAttribute("role", "img");
-  svg.setAttribute("aria-label", "Implied forward short-rate path: " + pts.map((p) => `${p.t ? p.t + "Y" : "now"} ${p.rate}%`).join(", "));
+  svg.setAttribute("aria-label", "Implied forward short-rate path: " + pts.map((p) => `${fwdLabel(p.m)} ${p.rate}%`).join(", "));
   const put = (tag, attrs, text) => {
     const el = document.createElementNS("http://www.w3.org/2000/svg", tag);
     for (const [key, v] of Object.entries(attrs)) el.setAttribute(key, v);
@@ -1094,23 +1101,23 @@ function buildForwardSvg(fwd) {
   }
 
   for (const p of pts) {
-    put("text", { x: xs(p.t), y: H - 10, class: "cv-xlabel", "text-anchor": "middle", "font-size": fs.axis }, p.t === 0 ? "Now" : `+${p.t}Y`);
+    put("text", { x: xs(p.m), y: H - 10, class: "cv-xlabel", "text-anchor": p.m === 0 ? "start" : p.m === tMax ? "end" : "middle", "font-size": fs.axis }, fwdLabel(p.m));
   }
 
   // stepped path — forward rates hold across each segment, which mirrors how
   // a draw schedule models a rate assumption per period
-  let d = `M${xs(pts[0].t).toFixed(1)},${ys(pts[0].rate).toFixed(1)}`;
+  let d = `M${xs(pts[0].m).toFixed(1)},${ys(pts[0].rate).toFixed(1)}`;
   for (let i = 1; i < pts.length; i++) {
-    d += ` L${xs(pts[i].t).toFixed(1)},${ys(pts[i - 1].rate).toFixed(1)} L${xs(pts[i].t).toFixed(1)},${ys(pts[i].rate).toFixed(1)}`;
+    d += ` L${xs(pts[i].m).toFixed(1)},${ys(pts[i - 1].rate).toFixed(1)} L${xs(pts[i].m).toFixed(1)},${ys(pts[i].rate).toFixed(1)}`;
   }
   put("path", { d, class: "cv-line", "stroke-width": 2 * k });
 
   for (const p of pts) {
-    put("circle", { cx: xs(p.t), cy: ys(p.rate), r: 4 * k, class: "cv-dot key", "stroke-width": 2 * k });
-    put("text", { x: xs(p.t), y: ys(p.rate) - 11 * k, class: "cv-vlabel", "text-anchor": "middle" , "font-size": fs.value }, p.rate.toFixed(2));
-    const hit = put("circle", { cx: xs(p.t), cy: ys(p.rate), r: 13 * k, class: "cv-hit" });
+    put("circle", { cx: xs(p.m), cy: ys(p.rate), r: 4 * k, class: "cv-dot key", "stroke-width": 2 * k });
+    put("text", { x: xs(p.m), y: ys(p.rate) - 11 * k, class: "cv-vlabel", "text-anchor": p.m === tMax ? "end" : "middle", "font-size": fs.value }, p.rate.toFixed(2));
+    const hit = put("circle", { cx: xs(p.m), cy: ys(p.rate), r: 13 * k, class: "cv-hit" });
     const title = document.createElementNS("http://www.w3.org/2000/svg", "title");
-    title.textContent = `${p.t === 0 ? "Now" : "+" + p.t + "Y"}: ${p.rate.toFixed(2)}%`;
+    title.textContent = `${fwdLabel(p.m)}: ${p.rate.toFixed(2)}%`;
     hit.appendChild(title);
   }
 
