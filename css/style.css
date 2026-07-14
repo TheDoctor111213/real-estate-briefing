@@ -532,16 +532,33 @@ main {
   .rt-chg.down { color: #ff7b6e; }
 }
 
+/* Chart header: identical geometry in every mode. Row 1 = title left, badge
+   pinned right. Row 2 = controls, always their own row. Nothing shifts with
+   title length. */
 .chart-head {
+  display: block;
+  margin: 22px 0 8px;
+}
+
+.chart-title-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  margin: 24px 0 8px;
+  min-width: 0;
 }
 
-.chart-title { display: flex; align-items: center; gap: 7px; min-width: 0; }
-.chart-title .section-head { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chart-title-row .section-head {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.chart-controls {
+  margin-top: 8px;
+  display: inline-flex;
+}
 
 .chart-badge {
   font-size: 8px;
@@ -556,27 +573,10 @@ main {
 .chart-badge.proj { background: var(--accent); color: var(--bg); }
 .chart-badge.actual { border: 1px solid var(--rule); color: var(--ink-3); }
 
-.map-toggle.scrolly {
-  overflow-x: auto;
-  scrollbar-width: none;
-  flex: none;
-  max-width: 62%;
-}
-
-.map-toggle.scrolly::-webkit-scrollbar { display: none; }
-
-/* Forward-mode horizon chips: on phones they take a full row of even-width
-   buttons instead of cramming beside the title */
+/* On phones the control row spans the full width with even-width buttons */
 @media (max-width: 700px) {
-  .chart-head { flex-wrap: wrap; }
-  .map-toggle.wrap-row {
-    order: 2;
-    width: 100%;
-    max-width: none;
-    margin-top: 7px;
-    display: flex;
-  }
-  .map-toggle.wrap-row button { flex: 1 1 0; padding: 6px 0; }
+  .chart-controls { display: flex; width: 100%; }
+  .chart-controls button { flex: 1 1 0; padding: 6px 0; text-align: center; }
 }
 
 .curve-wrap {

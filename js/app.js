@@ -941,8 +941,10 @@ function renderRates() {
   head.className = "chart-head";
   const histLabels = { "5Y": "5-Year Treasury", "10Y": "10-Year Treasury", "30Y": "30-Year Treasury", SOFR: "SOFR" };
 
-  const titleWrap = document.createElement("div");
-  titleWrap.className = "chart-title";
+  // Fixed geometry in every mode: title hugs the left margin, badge is pinned
+  // to the right margin, controls are always their own row beneath.
+  const titleRow = document.createElement("div");
+  titleRow.className = "chart-title-row";
   const title = sectionHead(
     state.rateChart === "forward" ? `SOFR Forward — Next ${state.fwdHorizon}`
     : state.rateChart === "history" ? `${histLabels[state.histKey] || ""} — Past ${state.histRange}`
@@ -952,11 +954,11 @@ function renderRates() {
   const badge = document.createElement("span");
   badge.className = "chart-badge " + (state.rateChart === "forward" ? "proj" : "actual");
   badge.textContent = state.rateChart === "forward" ? "PROJECTED" : "ACTUAL";
-  titleWrap.append(title, badge);
-  head.appendChild(titleWrap);
+  titleRow.append(title, badge);
+  head.appendChild(titleRow);
 
   const toggle = document.createElement("div");
-  toggle.className = "map-toggle scrolly";
+  toggle.className = "map-toggle chart-controls";
   if (state.rateChart === "history") {
     for (const rng of ["1M", "3M", "6M", "1Y"]) {
       const b = document.createElement("button");
@@ -970,7 +972,6 @@ function renderRates() {
     x.addEventListener("click", () => { state.rateChart = "curve"; state.histKey = null; renderRates(); });
     toggle.appendChild(x);
   } else if (state.rateChart === "forward") {
-    toggle.classList.add("wrap-row");
     for (const h of Object.keys(FWD_HORIZONS)) {
       const b = document.createElement("button");
       b.textContent = h;
@@ -1034,7 +1035,7 @@ function buildCurveSvg(t) {
   // and proportionally larger type instead of a shrunken desktop chart.
   const mobile = matchMedia("(max-width: 700px)").matches;
   const k = mobile ? 1.9 : 1; // text/mark scale factor
-  const W = 680, H = mobile ? 630 : 320;
+  const W = 680, H = mobile ? 545 : 320; // uniform phone height across all chart modes
   const padL = 46 * (mobile ? 1.5 : 1), padR = 20, padT = 20 * k, padB = 32 * k;
   const fs = { axis: 10 * k, value: 11 * k };
   const xs = (m) => padL + (Math.sqrt(m) - 1) / (Math.sqrt(360) - 1) * (W - padL - padR);
@@ -1110,9 +1111,7 @@ function buildForwardSvg(fwd, horizonMonths) {
 
   const mobile = matchMedia("(max-width: 700px)").matches;
   const k = mobile ? 1.9 : 1;
-  // slightly shorter than the other charts on phones: forward mode carries an
-  // extra control row, and the page must stay one screen
-  const W = 680, H = mobile ? 545 : 320;
+  const W = 680, H = mobile ? 545 : 320; // uniform phone height across all chart modes
   const padL = 46 * (mobile ? 1.5 : 1), padR = 26, padT = 24 * k, padB = 32 * k;
   const fs = { axis: 10 * k, value: 11 * k };
   const tMax = Math.max(...pts.map((p) => p.m));
@@ -1201,7 +1200,7 @@ function buildHistorySvg(r, key, range) {
 
   const mobile = matchMedia("(max-width: 700px)").matches;
   const k = mobile ? 1.9 : 1;
-  const W = 680, H = mobile ? 630 : 320;
+  const W = 680, H = mobile ? 545 : 320; // uniform phone height across all chart modes
   const padL = 46 * (mobile ? 1.5 : 1), padR = 54 * k * 0.6, padT = 20 * k, padB = 32 * k;
   const fs = { axis: 10 * k, value: 11 * k };
 
