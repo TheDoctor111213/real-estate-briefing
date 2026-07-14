@@ -1064,7 +1064,9 @@ function fwdLabel(m) {
 }
 
 function buildForwardSvg(fwd) {
-  const pts = (fwd || []).filter((p) => typeof p.rate === "number").map((p) => ({ m: p.m ?? (p.t || 0) * 12, rate: p.rate }));
+  const pts = (fwd || [])
+    .map((p) => ({ m: p.m ?? (p.t || 0) * 12, rate: p.rate }))
+    .filter((p) => Number.isFinite(p.m) && Number.isFinite(p.rate));
   if (pts.length < 2) {
     const p = document.createElement("p");
     p.style.cssText = "font-style:italic;color:var(--ink-2);padding:26px 10px";

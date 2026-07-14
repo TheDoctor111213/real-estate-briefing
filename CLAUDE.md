@@ -3,7 +3,7 @@
 A web app that compiles Matthew's real estate newsletters into a daily briefing with an in-app reader, deal map, weekly summary, and history archive.
 Static site (no build step): `index.html` + `css/style.css` + `js/app.js`, pipeline helpers in `scripts/`. Leaflet (CDN) powers the map.
 
-- **Hosting**: GitHub Pages, custom domain `briefing.pierrepontcompanies.com` (`CNAME` file). Deploys happen only when app code changes — data never requires a deploy.
+- **Hosting**: GitHub Pages, custom domain `briefing.pierrepontcompanies.com` (`CNAME` file). Deploys happen only when app code changes — data never requires a deploy. **When deploying js/css changes, bump the `?v=` query on both asset tags in `index.html`** — it prevents cached pages from pairing old code with new data shapes.
 - **Data**: Supabase project `uhwdnmbxiopfysodydty` (org ptxdileqdzaovbezrplg) — tables `days` (pk `date`, `data` jsonb, `generated_at`) and `weeks` (pk `week_of`, `data` jsonb, `generated_at`). RLS is open read AND open write on the publishable key (owner's accepted tradeoff, single-user app). The app reads it live via PostgREST.
 - **Local dev**: the `briefing` config in `.claude/launch.json` (python3 http.server, port 8420) — the app reads Supabase either way. `data/` holds the pipeline's working JSON files and is gitignored (also keeps subscriber-only article text out of the public repo).
 
