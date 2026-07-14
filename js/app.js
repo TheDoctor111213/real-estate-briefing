@@ -358,7 +358,7 @@ async function renderMap() {
         if (typeof loc.lat !== "number" || typeof loc.lng !== "number") continue;
         pts.push([loc.lat, loc.lng]);
         const marker = L.circleMarker([loc.lat, loc.lng], {
-          radius: 8, weight: 2, color: "#8a3324", fillColor: "#8a3324", fillOpacity: 0.35,
+          radius: 8, weight: 2, color: "#2158a8", fillColor: "#2158a8", fillOpacity: 0.35,
         });
         const div = document.createElement("div");
         div.className = "map-popup";
