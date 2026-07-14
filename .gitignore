@@ -1,0 +1,6 @@
+# Data lives in Supabase; local JSON files are the pipeline's working copies only.
+# Keeping them out of the public Pages repo also keeps subscriber-only article
+# text from being committed.
+data/
+
+.DS_Store
