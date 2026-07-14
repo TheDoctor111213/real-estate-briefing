@@ -970,10 +970,7 @@ function renderRates() {
     x.addEventListener("click", () => { state.rateChart = "curve"; state.histKey = null; renderRates(); });
     toggle.appendChild(x);
   } else if (state.rateChart === "forward") {
-    const back = document.createElement("button");
-    back.textContent = "‹ Curve";
-    back.addEventListener("click", () => { state.rateChart = "curve"; renderRates(); });
-    toggle.appendChild(back);
+    toggle.classList.add("wrap-row");
     for (const h of Object.keys(FWD_HORIZONS)) {
       const b = document.createElement("button");
       b.textContent = h;
@@ -981,6 +978,10 @@ function renderRates() {
       b.addEventListener("click", () => { state.fwdHorizon = h; renderRates(); });
       toggle.appendChild(b);
     }
+    const x = document.createElement("button");
+    x.textContent = "✕";
+    x.addEventListener("click", () => { state.rateChart = "curve"; renderRates(); });
+    toggle.appendChild(x);
   } else {
     for (const [mode, label] of [["curve", "Curve"], ["forward", "Forward"]]) {
       const b = document.createElement("button");
@@ -1016,7 +1017,7 @@ function renderRates() {
   const note = document.createElement("p");
   note.className = "rates-note";
   note.textContent = state.rateChart === "forward"
-    ? "Every point is in the FUTURE: the market's implied path for short rates (SOFR), starting at today's print and read off today's Treasury prices. Close to the OIS/futures curve lenders quote (±10–30bp) out to ~1Y; beyond that it runs a touch high. A modeling guide, not a quote."
+    ? "Every point is in the FUTURE — the market's implied SOFR path read from today's Treasury prices (±10–30bp vs the licensed OIS curve inside 1Y). A modeling guide, not a quote."
     : state.rateChart === "history"
     ? "Every point is in the PAST — actual daily prints from treasury.gov and the New York Fed. Tap the highlighted pane again to return to the yield curve."
     : `Treasury par yield curve as of ${r.curveDate}; SOFR published by the New York Fed (${r.sofr?.date}). Changes are vs the prior business day.`;
@@ -1109,7 +1110,9 @@ function buildForwardSvg(fwd, horizonMonths) {
 
   const mobile = matchMedia("(max-width: 700px)").matches;
   const k = mobile ? 1.9 : 1;
-  const W = 680, H = mobile ? 630 : 320;
+  // slightly shorter than the other charts on phones: forward mode carries an
+  // extra control row, and the page must stay one screen
+  const W = 680, H = mobile ? 545 : 320;
   const padL = 46 * (mobile ? 1.5 : 1), padR = 26, padT = 24 * k, padB = 32 * k;
   const fs = { axis: 10 * k, value: 11 * k };
   const tMax = Math.max(...pts.map((p) => p.m));
@@ -1137,8 +1140,23 @@ function buildForwardSvg(fwd, horizonMonths) {
     put("text", { x: padL - 8, y: ys(g) + fs.axis * 0.34, class: "cv-ylabel", "text-anchor": "end", "font-size": fs.axis }, g.toFixed(2));
   }
 
-  for (const p of pts) {
-    put("text", { x: xs(p.m), y: H - 10, class: "cv-xlabel", "text-anchor": p.m === 0 ? "start" : p.m === tMax ? "end" : "middle", "font-size": fs.axis }, fwdLabel(p.m));
+  // Pick which points get text so labels can never overlap: walk left-to-right
+  // enforcing a minimum x-gap, and always keep the first and last points.
+  const labelGap = 62 * (mobile ? 1.35 : 1);
+  const labeled = new Set([0, pts.length - 1]);
+  let lastX = xs(pts[0].m);
+  for (let i = 1; i < pts.length - 1; i++) {
+    const x = xs(pts[i].m);
+    if (x - lastX >= labelGap && xs(pts[pts.length - 1].m) - x >= labelGap) {
+      labeled.add(i);
+      lastX = x;
+    }
+  }
+
+  for (let i = 0; i < pts.length; i++) {
+    if (!labeled.has(i)) continue;
+    const p = pts[i];
+    put("text", { x: xs(p.m), y: H - 10, class: "cv-xlabel", "text-anchor": i === 0 ? "start" : i === pts.length - 1 ? "end" : "middle", "font-size": fs.axis }, fwdLabel(p.m));
   }
 
   // stepped path — forward rates hold across each segment, which mirrors how
@@ -1149,9 +1167,13 @@ function buildForwardSvg(fwd, horizonMonths) {
   }
   put("path", { d, class: "cv-line", "stroke-width": 2 * k });
 
-  for (const p of pts) {
-    put("circle", { cx: xs(p.m), cy: ys(p.rate), r: 4 * k, class: "cv-dot key", "stroke-width": 2 * k });
-    put("text", { x: xs(p.m), y: ys(p.rate) - 11 * k, class: "cv-vlabel", "text-anchor": p.m === tMax ? "end" : "middle", "font-size": fs.value }, p.rate.toFixed(2));
+  for (let i = 0; i < pts.length; i++) {
+    const p = pts[i];
+    const isLabeled = labeled.has(i);
+    put("circle", { cx: xs(p.m), cy: ys(p.rate), r: (isLabeled ? 4 : 2.5) * k, class: "cv-dot" + (isLabeled ? " key" : ""), "stroke-width": 2 * k });
+    if (isLabeled) {
+      put("text", { x: xs(p.m), y: ys(p.rate) - 11 * k, class: "cv-vlabel", "text-anchor": i === pts.length - 1 ? "end" : i === 0 ? "start" : "middle", "font-size": fs.value }, p.rate.toFixed(2));
+    }
     const hit = put("circle", { cx: xs(p.m), cy: ys(p.rate), r: 13 * k, class: "cv-hit" });
     const title = document.createElementNS("http://www.w3.org/2000/svg", "title");
     title.textContent = `${fwdLabel(p.m)}: ${p.rate.toFixed(2)}%`;

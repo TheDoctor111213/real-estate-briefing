@@ -565,6 +565,20 @@ main {
 
 .map-toggle.scrolly::-webkit-scrollbar { display: none; }
 
+/* Forward-mode horizon chips: on phones they take a full row of even-width
+   buttons instead of cramming beside the title */
+@media (max-width: 700px) {
+  .chart-head { flex-wrap: wrap; }
+  .map-toggle.wrap-row {
+    order: 2;
+    width: 100%;
+    max-width: none;
+    margin-top: 7px;
+    display: flex;
+  }
+  .map-toggle.wrap-row button { flex: 1 1 0; padding: 6px 0; }
+}
+
 .curve-wrap {
   background: var(--box);
   border: 1px solid var(--rule);
