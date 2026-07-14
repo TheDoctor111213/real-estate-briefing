@@ -18,12 +18,13 @@ Static site (no build step): `index.html` + `css/style.css` + `js/app.js`, pipel
 - CRE Daily — `mail@news.credaily.com` (daily; often carries full story text in the email)
 - CRE Daily New York — `mail@newyork.credaily.com` (daily)
 - The Real Deal — `elerts@e.therealdeal.com` (mix of daily elerts, weekly recaps, and special/breaking blasts)
+- Traded — any `@traded.co` sender; search `from:traded.co` (National digest ~2×/week; treat regular editions as `daily` cadence). Traded editions are lists of individual closings/listings — each deal (address, price, buyer/seller/broker) becomes its own story with a precise `locations` pin; these are the best map content we get. Group them under a market-level `section` (New York, National, ...) and don't mark routine deal items `featured` unless one is genuinely headline-scale.
 
 Also include any other newsletter that is clearly real-estate news. Skip welcome/confirmation emails, job alerts, meetup blasts, and promotional one-offs.
 
 ## Daily update procedure (for the scheduled task)
 
-1. Search Gmail: `from:(select@inman.com OR mail@news.credaily.com OR mail@newyork.credaily.com OR elerts@e.therealdeal.com) newer_than:1d` — plus a broader pass for other real-estate newsletters received today (America/New_York).
+1. Search Gmail: `from:(select@inman.com OR mail@news.credaily.com OR mail@newyork.credaily.com OR elerts@e.therealdeal.com OR traded.co) after:<today>` — plus a broader pass for other real-estate newsletters received today (America/New_York).
 2. For each newsletter, get the message and extract stories from the HTML body. Large bodies get saved to a tool-results file; parse with python (`html.parser`), never by reading raw HTML into context. Tracking links like `link.therealdeal.com/click/<id>/<base64>` decode via urlsafe-base64 (pad with `=`) to the real article URL — strip query params.
 3. **Classify cadence** per newsletter edition: `daily` (regular daily edition), `weekly` (weekly recap/digest), or `special` (breaking-news or one-off themed blast). Every story inherits its newsletter's cadence.
 4. **Synthesize** ONE deduped story list. Same story in two newsletters → one entry, both names in `sources`. Assign each story a short reusable `section` (New York, Capital Markets, Residential, Development, Policy, Tech, ...). Mark the 3–5 most important `featured: true`.
