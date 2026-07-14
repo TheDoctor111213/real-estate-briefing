@@ -55,7 +55,10 @@ const state = {
   rateChart: "curve",  // "curve" | "forward" | "history"
   histKey: null,       // which pane's trend is showing: "5Y" | "10Y" | "30Y" | "SOFR"
   histRange: "3M",     // "1M" | "3M" | "6M" | "1Y"
+  fwdHorizon: "1Y",    // forward-view horizon: "30D" | "90D" | "6M" | "1Y" | "3Y" | "5Y"
 };
+
+const FWD_HORIZONS = { "30D": 1, "90D": 3, "6M": 6, "1Y": 12, "3Y": 36, "5Y": 60 };
 
 const $ = (id) => document.getElementById(id);
 
@@ -937,16 +940,23 @@ function renderRates() {
   const head = document.createElement("div");
   head.className = "chart-head";
   const histLabels = { "5Y": "5-Year Treasury", "10Y": "10-Year Treasury", "30Y": "30-Year Treasury", SOFR: "SOFR" };
+
+  const titleWrap = document.createElement("div");
+  titleWrap.className = "chart-title";
   const title = sectionHead(
-    state.rateChart === "forward" ? "Implied Forward Path"
-    : state.rateChart === "history" ? `${histLabels[state.histKey] || ""} Trend`
+    state.rateChart === "forward" ? `SOFR Forward — Next ${state.fwdHorizon}`
+    : state.rateChart === "history" ? `${histLabels[state.histKey] || ""} — Past ${state.histRange}`
     : "Treasury Yield Curve"
   );
   title.style.margin = "0";
-  head.appendChild(title);
+  const badge = document.createElement("span");
+  badge.className = "chart-badge " + (state.rateChart === "forward" ? "proj" : "actual");
+  badge.textContent = state.rateChart === "forward" ? "PROJECTED" : "ACTUAL";
+  titleWrap.append(title, badge);
+  head.appendChild(titleWrap);
 
   const toggle = document.createElement("div");
-  toggle.className = "map-toggle";
+  toggle.className = "map-toggle scrolly";
   if (state.rateChart === "history") {
     for (const rng of ["1M", "3M", "6M", "1Y"]) {
       const b = document.createElement("button");
@@ -959,6 +969,18 @@ function renderRates() {
     x.textContent = "✕";
     x.addEventListener("click", () => { state.rateChart = "curve"; state.histKey = null; renderRates(); });
     toggle.appendChild(x);
+  } else if (state.rateChart === "forward") {
+    const back = document.createElement("button");
+    back.textContent = "‹ Curve";
+    back.addEventListener("click", () => { state.rateChart = "curve"; renderRates(); });
+    toggle.appendChild(back);
+    for (const h of Object.keys(FWD_HORIZONS)) {
+      const b = document.createElement("button");
+      b.textContent = h;
+      b.className = state.fwdHorizon === h ? "on" : "";
+      b.addEventListener("click", () => { state.fwdHorizon = h; renderRates(); });
+      toggle.appendChild(b);
+    }
   } else {
     for (const [mode, label] of [["curve", "Curve"], ["forward", "Forward"]]) {
       const b = document.createElement("button");
@@ -974,7 +996,7 @@ function renderRates() {
   const chart = document.createElement("div");
   chart.className = "curve-wrap";
   chart.appendChild(
-    state.rateChart === "forward" ? buildForwardSvg(r.forward || [])
+    state.rateChart === "forward" ? buildForwardSvg(r.forward || [], FWD_HORIZONS[state.fwdHorizon] || 12)
     : state.rateChart === "history" ? buildHistorySvg(r, state.histKey, state.histRange)
     : buildCurveSvg(r.treasury)
   );
@@ -994,9 +1016,9 @@ function renderRates() {
   const note = document.createElement("p");
   note.className = "rates-note";
   note.textContent = state.rateChart === "forward"
-    ? "Implied forward path from today's T-bill/note yields (monthly to 180d, then 1Y). Short bills track the expected Fed path closely — typically within ~10–30bp of the OIS/futures curve, which is licensed data. A modeling guide, not a quote."
+    ? "Every point is in the FUTURE: the market's implied path for short rates (SOFR), starting at today's print and read off today's Treasury prices. Close to the OIS/futures curve lenders quote (±10–30bp) out to ~1Y; beyond that it runs a touch high. A modeling guide, not a quote."
     : state.rateChart === "history"
-    ? "Daily official prints: Treasury par yields (treasury.gov) and SOFR (New York Fed). Tap the highlighted pane again to return to the yield curve."
+    ? "Every point is in the PAST — actual daily prints from treasury.gov and the New York Fed. Tap the highlighted pane again to return to the yield curve."
     : `Treasury par yield curve as of ${r.curveDate}; SOFR published by the New York Fed (${r.sofr?.date}). Changes are vs the prior business day.`;
   wrap.appendChild(note);
 }
@@ -1069,15 +1091,15 @@ function buildCurveSvg(t) {
 }
 
 function fwdLabel(m) {
-  if (m === 0) return "Now";
+  if (m === 0) return "Today";
   if (m < 12) return `+${m * 30}d`;
-  return m === 12 ? "+1Y" : `+${m / 12}Y`;
+  return m % 12 === 0 ? `+${m / 12}Y` : `+${m}mo`;
 }
 
-function buildForwardSvg(fwd) {
+function buildForwardSvg(fwd, horizonMonths) {
   const pts = (fwd || [])
     .map((p) => ({ m: p.m ?? (p.t || 0) * 12, rate: p.rate }))
-    .filter((p) => Number.isFinite(p.m) && Number.isFinite(p.rate));
+    .filter((p) => Number.isFinite(p.m) && Number.isFinite(p.rate) && p.m <= (horizonMonths || 12));
   if (pts.length < 2) {
     const p = document.createElement("p");
     p.style.cssText = "font-style:italic;color:var(--ink-2);padding:26px 10px";
