@@ -56,6 +56,8 @@ a { color: inherit; }
   align-items: center;
   justify-content: center;
   padding: 24px calc(24px + env(safe-area-inset-right)) calc(24px + env(safe-area-inset-bottom)) 24px;
+  /* no double-tap-to-zoom on the keypad — a missed key shouldn't zoom the screen */
+  touch-action: manipulation;
 }
 
 /* remembered devices: hidden before first paint via the <head> script */
@@ -134,6 +136,7 @@ body.unlocked .lock { display: none; }
   -webkit-tap-highlight-color: transparent;
   transition: background 0.1s ease, transform 0.05s ease;
   user-select: none;
+  touch-action: manipulation;
 }
 
 .lock-keys button:active { background: var(--rule); transform: scale(0.95); }
