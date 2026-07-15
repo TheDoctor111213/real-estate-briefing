@@ -40,19 +40,34 @@ DROP_SUBTREES = {"script", "style", "noscript", "iframe", "form", "aside", "nav"
 JUNK = re.compile(r"related|share|social|newsletter|promo|ad-|advert|subscribe|paywall|comment|footer|nav|menu|sidebar|recirc|trending|signup|modal|byline-block", re.I)
 
 
+VOID = {"img", "br", "hr", "meta", "input", "source", "link", "area", "base",
+        "col", "embed", "param", "track", "wbr"}
+
+
 class ArticleExtractor(HTMLParser):
-    """Collect allowed elements inside <article> (or the whole body as fallback)."""
+    """Collect allowed elements inside <article> (or the whole body as fallback).
+
+    Junk subtrees (nav, share widgets, related-story rails, paywall gates) are
+    skipped by depth: when one opens we record its depth and drop everything
+    until the parser returns to that depth. This is balanced by construction —
+    a stray unclosed <div> can never leave us stuck in skip mode the way a
+    plain increment/decrement counter could."""
 
     def __init__(self, scope_to_article: bool):
         super().__init__(convert_charrefs=True)
         self.scope_to_article = scope_to_article
         self.in_article = 0 if scope_to_article else 1
-        self.drop = 0
+        self.depth = 0            # nesting depth of open non-void elements
+        self.drop_depth = None    # depth at which the current skipped subtree began
         self.out = []
-        self.open_keep = []  # stack of kept tags
+        self.open_keep = []       # stack of emitted KEEP tags
         self.og_image = None
         self.title = None
         self._in_title = False
+
+    @property
+    def dropping(self):
+        return self.drop_depth is not None
 
     def handle_starttag(self, tag, attrs):
         a = dict(attrs)
@@ -60,66 +75,102 @@ class ArticleExtractor(HTMLParser):
             self.og_image = a.get("content")
         if tag == "title":
             self._in_title = True
+
+        void = tag in VOID
+        emit = self.in_article and not self.dropping
+
         if tag == "article" and self.scope_to_article:
             self.in_article += 1
-            return
-        if self.drop or not self.in_article:
-            if tag in DROP_SUBTREES or JUNK.search(a.get("class", "") + " " + a.get("id", "")):
-                self.drop += 1 if tag in DROP_SUBTREES else 0
-            if tag in DROP_SUBTREES:
-                self.drop += 0  # handled above
-            return
-        if tag in DROP_SUBTREES or JUNK.search(a.get("class", "") + " " + a.get("id", "")):
-            self.drop += 1
-            return
-        if tag in KEEP:
-            if tag == "img":
-                src = a.get("src") or a.get("data-src") or ""
-                # skip WordPress-style small thumbnails (related-story teasers)
-                m = re.search(r"-(\d+)x(\d+)\.(?:jpe?g|png|webp|gif)$", src)
-                if m and int(m.group(1)) < 400:
-                    return
-                if src.startswith("http"):
-                    alt = (a.get("alt") or "").replace('"', "&quot;")
-                    self.out.append(f'<img src="{src}" alt="{alt}">')
-                return
+        elif emit and tag == "img":
+            src = a.get("src") or a.get("data-src") or ""
+            m = re.search(r"-(\d+)x(\d+)\.(?:jpe?g|png|webp|gif)$", src)  # skip small WP thumbs
+            if not (m and int(m.group(1)) < 400) and src.startswith("http"):
+                alt = (a.get("alt") or "").replace('"', "&quot;")
+                self.out.append(f'<img src="{src}" alt="{alt}">')
+        elif emit and (tag in DROP_SUBTREES or JUNK.search(a.get("class", "") + " " + a.get("id", ""))):
+            self.drop_depth = self.depth  # begin skipping this subtree
+        elif emit and tag in KEEP:
             self.open_keep.append(tag)
             self.out.append(f"<{tag}>")
+
+        if not void:
+            self.depth += 1
+
+    def handle_startendtag(self, tag, attrs):
+        # self-closed tag (e.g. <img/>) — treat as a start of a void element
+        self.handle_starttag(tag, attrs)
 
     def handle_endtag(self, tag):
         if tag == "title":
             self._in_title = False
+        if tag in VOID:
+            return
+
+        self.depth -= 1
+        if self.dropping:
+            if self.depth <= self.drop_depth:
+                self.drop_depth = None  # returned to where the skip began
+            return
+
         if tag == "article" and self.scope_to_article and self.in_article:
             self.in_article -= 1
-            return
-        if self.drop:
-            if tag in DROP_SUBTREES or (self.open_keep and tag not in KEEP):
-                self.drop = max(0, self.drop - 1)
-            if tag in DROP_SUBTREES:
-                return
-            return
-        if tag in KEEP and tag != "img" and self.open_keep and self.open_keep[-1] == tag:
+        elif tag in KEEP and self.open_keep and self.open_keep[-1] == tag:
             self.open_keep.pop()
             self.out.append(f"</{tag}>")
 
     def handle_data(self, data):
         if self._in_title and self.title is None and data.strip():
             self.title = data.strip()
-        if self.in_article and not self.drop and self.open_keep:
+        if self.in_article and not self.dropping and self.open_keep:
             self.out.append(data)
 
 
-def extract(url: str) -> dict:
-    headers = {"User-Agent": UA, "Accept": "text/html"}
-    is_trd = "therealdeal.com" in urllib.parse.urlparse(url).netloc
-    if is_trd:
+def _looks_blocked(html: str) -> bool:
+    """A Cloudflare/anti-bot interstitial rather than the real article."""
+    low = html[:4000].lower()
+    return ("just a moment" in low and "challenge-platform" in html.lower()) or \
+           ("attention required" in low and "cloudflare" in low) or len(html) < 1200
+
+
+def _fetch_direct(url: str) -> str:
+    headers = {"User-Agent": UA, "Accept": "text/html,application/xhtml+xml,*/*;q=0.8",
+               "Accept-Language": "en-US,en;q=0.9"}
+    if "therealdeal.com" in urllib.parse.urlparse(url).netloc:
         cookie = _trd_cookie()
         if cookie:
             headers["Cookie"] = cookie
     req = urllib.request.Request(url, headers=headers)
     with urllib.request.urlopen(req, timeout=30) as resp:
-        raw = resp.read()
-    html = raw.decode("utf-8", errors="replace")
+        return resp.read().decode("utf-8", errors="replace")
+
+
+def _fetch_via_proxy(url: str) -> str:
+    """Fetch through the Supabase fetch-proxy edge function — works where the
+    run environment's egress is blocked, or where a site rate-limits our IP but
+    not Supabase's. The proxy forwards the TRD cookie and follows redirects."""
+    pu = f"{SUPABASE_URL}/functions/v1/fetch-proxy?url=" + urllib.parse.quote(url, safe="")
+    req = urllib.request.Request(pu, headers={"apikey": ANON_KEY, "Authorization": f"Bearer {ANON_KEY}"})
+    with urllib.request.urlopen(req, timeout=60) as resp:
+        doc = json.load(resp)
+    if doc.get("html"):
+        return doc["html"]
+    raise RuntimeError(doc.get("error") or f"proxy status {doc.get('status')}")
+
+
+def _get_html(url: str) -> str:
+    """Direct fetch first; fall back to the edge proxy on failure or a bot wall."""
+    try:
+        html = _fetch_direct(url)
+        if not _looks_blocked(html):
+            return html
+    except Exception:
+        pass  # egress blocked, timeout, 403 — try the proxy
+    return _fetch_via_proxy(url)
+
+
+def extract(url: str) -> dict:
+    is_trd = "therealdeal.com" in urllib.parse.urlparse(url).netloc
+    html = _get_html(url)
 
     has_article_tag = "<article" in html
     p = ArticleExtractor(scope_to_article=has_article_tag)
