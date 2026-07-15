@@ -50,6 +50,14 @@ def push_week(path: pathlib.Path) -> None:
     print(f"pushed week {doc['weekOf']}")
 
 
+def push_players(path: pathlib.Path) -> None:
+    doc = json.loads(path.read_text())
+    players = doc.get("players", {})
+    for slug, entity in players.items():
+        upsert("players", {"slug": slug, "data": entity, "updated_at": doc.get("generatedAt")})
+    print(f"pushed {len(players)} players")
+
+
 def main() -> None:
     only = sys.argv[1] if len(sys.argv) > 1 else None
     days = sorted(DATA.glob("????-??-??.json"))
@@ -60,7 +68,10 @@ def main() -> None:
         push_day(p)
     for p in weeks:
         push_week(p)
-    if not days and not weeks:
+    players = DATA / "players.json"
+    if players.exists():
+        push_players(players)  # the roster rides along on every publish
+    if not days and not weeks and not players.exists():
         print("nothing to push")
 
 

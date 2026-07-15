@@ -9,7 +9,7 @@
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🗞️</text></svg>">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
   <!-- bump ?v= on every deploy so cached pages can never pair old code with new data -->
-  <link rel="stylesheet" href="css/style.css?v=8">
+  <link rel="stylesheet" href="css/style.css?v=9">
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" defer></script>
 </head>
 <body>
@@ -28,6 +28,7 @@
         <a href="#/" data-tab="briefing">Briefing</a>
         <a href="#/map" data-tab="map">Map</a>
         <a href="#/weekly" data-tab="weekly">Weekly</a>
+        <a href="#/players" data-tab="players">Players</a>
         <a href="#/history" data-tab="history">History</a>
         <a href="#/rates" data-tab="rates">Rates</a>
       </nav>
@@ -68,6 +69,11 @@
       <div id="weekly-content"></div>
     </section>
 
+    <!-- Players -->
+    <section id="view-players" class="view" hidden>
+      <div id="players-content"></div>
+    </section>
+
     <!-- History -->
     <section id="view-history" class="view" hidden>
       <div id="history-list"></div>
@@ -99,6 +105,6 @@
 
   <div id="toast" role="status"></div>
 
-  <script src="js/app.js?v=8"></script>
+  <script src="js/app.js?v=9"></script>
 </body>
 </html>

@@ -1,5 +1,5 @@
-/* Real Estate Briefing — views: briefing / map / weekly / history, plus reader overlay.
-   Hash routes: #/ · #/day/DATE · #/story/DATE/ID · #/map · #/weekly · #/history
+/* Real Estate Briefing — views: briefing / map / weekly / players / history / rates, plus reader overlay.
+   Hash routes: #/ · #/day/DATE · #/story/DATE/ID · #/map · #/weekly · #/players · #/player/SLUG · #/history · #/rates
    Data lives in Supabase (public-read); the pipeline upserts via scripts/push_data.py. */
 
 const SUPABASE_URL = "https://uhwdnmbxiopfysodydty.supabase.co";
@@ -52,6 +52,10 @@ const state = {
   groupBy: "section",
   mapTypeFilter: null, // null = all; otherwise a Set of dealTypes
   controlsDate: null,  // filters reset when the viewed day changes
+  players: null,       // slug -> entity (people + companies roster)
+  playerType: "people",   // "people" | "companies"
+  playerSort: "active",   // "active" | "volume" | "az"
+  playerQuery: "",
   rateChart: "curve",  // "curve" | "forward" | "history"
   histKey: null,       // which pane's trend is showing: "5Y" | "10Y" | "30Y" | "SOFR"
   histRange: "3M",     // "1M" | "3M" | "6M" | "1Y"
@@ -145,6 +149,7 @@ async function refreshData(silent) {
     if (latest && latest !== target) state.days.delete(latest);
     const wk = state.weeks[state.weeks.length - 1];
     if (wk) state.weeksData.delete(wk);
+    state.players = null; // roster refetches next time the Players view opens
 
     const fresh = target ? await getDay(target) : null;
     state.currentDate = target;
@@ -190,6 +195,12 @@ function route() {
   } else if (h === "#/weekly") {
     showView("weekly");
     renderWeekly();
+  } else if ((m = h.match(/^#\/player\/([\w-]+)$/))) {
+    showView("players");
+    renderPlayerProfile(m[1]);
+  } else if (h === "#/players") {
+    showView("players");
+    renderPlayers();
   } else if (h === "#/history") {
     showView("history");
     renderHistory();
@@ -800,6 +811,285 @@ async function renderHistory() {
     card.appendChild(meta);
 
     wrap.appendChild(card);
+  }
+}
+
+/* ---------- players ---------- */
+
+async function getPlayers() {
+  if (state.players) return state.players;
+  const m = new Map();
+  try {
+    const rows = await sb("players?select=slug,data");
+    for (const r of rows) {
+      // slugs starting with "_" are pipeline bookkeeping (candidate ledger), not profiles
+      if (!r.slug.startsWith("_") && r.data?.name) m.set(r.slug, { slug: r.slug, ...r.data });
+    }
+  } catch { /* leave empty */ }
+  state.players = m;
+  return m;
+}
+
+function daysSince(iso) {
+  if (!iso) return 9999;
+  const [y, mo, d] = iso.split("-").map(Number);
+  return Math.max(0, (Date.now() - new Date(y, mo - 1, d).getTime()) / 86400000);
+}
+
+/* Recency-weighted activity: a mention today counts 1, one from ~6 weeks ago ~0.5.
+   Keeps the roster self-ranking as it grows — dormant names sink, they don't clutter. */
+function playerScore(p) {
+  return (p.mentions || []).reduce((sum, mn) => sum + 1 / (1 + daysSince(mn.date) / 45), 0);
+}
+
+const MENTION_ROLES = {
+  subject: "In the story", buyer: "Buyer", seller: "Seller", developer: "Developer",
+  lender: "Lender", borrower: "Borrower", landlord: "Landlord", tenant: "Tenant", broker: "Broker",
+};
+
+async function renderPlayers() {
+  const wrap = $("players-content");
+  wrap.innerHTML = "";
+  const players = await getPlayers();
+
+  if (!players.size) {
+    const p = document.createElement("p");
+    p.style.cssText = "font-style:italic;color:var(--ink-2);padding:40px 0;text-align:center";
+    p.textContent = "No players yet — the roster builds as briefings accumulate.";
+    wrap.appendChild(p);
+    return;
+  }
+
+  const all = [...players.values()];
+  const nPeople = all.filter((p) => p.type === "person").length;
+
+  const bar = document.createElement("div");
+  bar.className = "players-bar";
+
+  const toggle = document.createElement("div");
+  toggle.className = "map-toggle";
+  for (const [key, label, n] of [["people", "People", nPeople], ["companies", "Companies", all.length - nPeople]]) {
+    const b = document.createElement("button");
+    b.className = state.playerType === key ? "on" : "";
+    b.textContent = `${label} · ${n}`;
+    b.addEventListener("click", () => {
+      state.playerType = key;
+      for (const btn of toggle.children) btn.classList.toggle("on", btn === b);
+      renderPlayerList(all);
+    });
+    toggle.appendChild(b);
+  }
+
+  const search = document.createElement("input");
+  search.className = "player-search";
+  search.type = "search";
+  search.placeholder = "Search names, firms, markets…";
+  search.value = state.playerQuery;
+  search.addEventListener("input", () => { state.playerQuery = search.value; renderPlayerList(all); });
+
+  const sort = document.createElement("select");
+  sort.className = "ctl-select";
+  for (const [val, label] of [["active", "Most active"], ["volume", "Deal volume"], ["az", "A–Z"]]) {
+    const o = document.createElement("option");
+    o.value = val;
+    o.textContent = label;
+    sort.appendChild(o);
+  }
+  sort.value = state.playerSort;
+  sort.addEventListener("change", () => { state.playerSort = sort.value; renderPlayerList(all); });
+
+  bar.append(toggle, search, sort);
+  wrap.appendChild(bar);
+
+  const list = document.createElement("div");
+  list.id = "player-list";
+  wrap.appendChild(list);
+
+  const hint = document.createElement("p");
+  hint.className = "players-hint";
+  hint.textContent = "Compiled from the newsletters: the people and firms behind the deals. Profiles deepen as coverage accumulates.";
+  wrap.appendChild(hint);
+
+  renderPlayerList(all);
+}
+
+function renderPlayerList(all) {
+  const listWrap = $("player-list");
+  if (!listWrap) return;
+  listWrap.innerHTML = "";
+
+  const q = state.playerQuery.trim().toLowerCase();
+  let list = all.filter((p) => (state.playerType === "people") === (p.type === "person"));
+  if (q) {
+    list = list.filter((p) =>
+      [p.name, p.role, p.org, p.tagline, ...(p.markets || []), ...(p.assetClasses || [])]
+        .filter(Boolean).join(" ").toLowerCase().includes(q)
+    );
+  }
+
+  if (state.playerSort === "volume") {
+    list.sort((a, b) => (b.stats?.dealVolumeUsd || 0) - (a.stats?.dealVolumeUsd || 0));
+  } else if (state.playerSort === "az") {
+    list.sort((a, b) => a.name.localeCompare(b.name));
+  } else {
+    list.sort((a, b) => playerScore(b) - playerScore(a) || (b.stats?.dealVolumeUsd || 0) - (a.stats?.dealVolumeUsd || 0));
+  }
+
+  if (!list.length) {
+    const p = document.createElement("p");
+    p.style.cssText = "font-style:italic;color:var(--ink-2);padding:30px 0;text-align:center";
+    p.textContent = "No matches.";
+    listWrap.appendChild(p);
+    return;
+  }
+
+  const grid = document.createElement("div");
+  grid.className = "player-grid";
+  for (const p of list) grid.appendChild(playerCard(p));
+  listWrap.appendChild(grid);
+}
+
+function playerCard(p) {
+  const el = document.createElement("button");
+  el.className = "player-card";
+  el.addEventListener("click", () => { location.hash = `/player/${p.slug}`; });
+
+  const h3 = document.createElement("h3");
+  h3.textContent = p.name;
+  el.appendChild(h3);
+
+  const kicker = document.createElement("div");
+  kicker.className = "player-kicker";
+  const showOrg = p.type === "person" && p.org && !(p.role || "").toLowerCase().includes(p.org.toLowerCase());
+  kicker.textContent = [p.role, showOrg ? p.org : null].filter(Boolean).join(" · ");
+  el.appendChild(kicker);
+
+  if (p.tagline) {
+    const tag = document.createElement("p");
+    tag.textContent = p.tagline;
+    el.appendChild(tag);
+  }
+
+  const chips = document.createElement("div");
+  chips.className = "chips";
+  const vol = fmtValue(p.stats?.dealVolumeUsd);
+  if (vol) chips.appendChild(chip(vol + " tracked", "chip-value"));
+  for (const mkt of (p.markets || []).slice(0, 2)) chips.appendChild(chip(mkt));
+  for (const ac of (p.assetClasses || []).slice(0, 2)) chips.appendChild(chip(ac));
+  if (chips.children.length) el.appendChild(chips);
+
+  const meta = document.createElement("div");
+  meta.className = "meta";
+  const n = p.stats?.mentions || (p.mentions || []).length;
+  const last = p.stats?.lastSeen || p.mentions?.[0]?.date;
+  meta.textContent = `${n} mention${n === 1 ? "" : "s"}` + (last ? ` · last ${formatDate(last, { month: "short", day: "numeric" })}` : "");
+  el.appendChild(meta);
+
+  return el;
+}
+
+async function renderPlayerProfile(slug) {
+  const wrap = $("players-content");
+  wrap.innerHTML = "";
+  const players = await getPlayers();
+  const p = players.get(slug);
+  if (!p) { location.hash = "/players"; return; }
+
+  const back = document.createElement("button");
+  back.className = "player-back";
+  back.textContent = "‹ All players";
+  back.addEventListener("click", () => { location.hash = "/players"; });
+  wrap.appendChild(back);
+
+  const name = document.createElement("h1");
+  name.className = "player-name";
+  name.textContent = p.name;
+  wrap.appendChild(name);
+
+  const roleLine = document.createElement("p");
+  roleLine.className = "player-roleline";
+  roleLine.textContent = p.role || (p.type === "person" ? "Person" : "Company");
+  wrap.appendChild(roleLine);
+
+  // person → firm cross-link when the firm has its own profile
+  if (p.type === "person" && p.org) {
+    const target = [...players.values()].find(
+      (c) => c.type === "company" && c.name.toLowerCase() === p.org.toLowerCase()
+    );
+    if (target) {
+      const link = document.createElement("button");
+      link.className = "chip chip-filter player-org-link";
+      link.textContent = p.org + " ›";
+      link.addEventListener("click", () => { location.hash = `/player/${target.slug}`; });
+      const row = document.createElement("div");
+      row.className = "chips";
+      row.appendChild(link);
+      wrap.appendChild(row);
+    }
+  }
+
+  const tiles = document.createElement("div");
+  tiles.className = "rate-tiles player-tiles";
+  const n = p.stats?.mentions || (p.mentions || []).length;
+  const cells = [
+    ["Mentions", String(n)],
+    ["Tracked volume", fmtValue(p.stats?.dealVolumeUsd) || "—"],
+    ["First seen", p.stats?.firstSeen ? formatDate(p.stats.firstSeen, { month: "short", day: "numeric" }) : "—"],
+    ["Last seen", p.stats?.lastSeen ? formatDate(p.stats.lastSeen, { month: "short", day: "numeric" }) : "—"],
+  ];
+  for (const [label, value] of cells) {
+    const tile = document.createElement("div");
+    tile.className = "rate-tile";
+    const l = document.createElement("div");
+    l.className = "rt-label";
+    l.textContent = label;
+    const v = document.createElement("div");
+    v.className = "rt-value";
+    v.textContent = value;
+    tile.append(l, v);
+    tiles.appendChild(tile);
+  }
+  wrap.appendChild(tiles);
+
+  if (p.profile) {
+    const dossier = document.createElement("div");
+    dossier.className = "player-dossier";
+    for (const para of p.profile.split(/\n+/).filter(Boolean)) {
+      const el = document.createElement("p");
+      el.textContent = para;
+      dossier.appendChild(el);
+    }
+    wrap.appendChild(dossier);
+  }
+
+  const chips = document.createElement("div");
+  chips.className = "chips";
+  for (const mkt of p.markets || []) chips.appendChild(chip(mkt));
+  for (const ac of p.assetClasses || []) chips.appendChild(chip(ac));
+  if (chips.children.length) wrap.appendChild(chips);
+
+  const mentions = (p.mentions || []).slice().sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+  if (mentions.length) {
+    wrap.appendChild(sectionHead("In the news"));
+    const list = document.createElement("div");
+    list.className = "week-stories";
+    for (const mn of mentions) {
+      const btn = document.createElement("button");
+      btn.className = "week-story";
+      btn.addEventListener("click", () => { location.hash = `/story/${mn.date}/${mn.id}`; });
+      const h4 = document.createElement("h4");
+      h4.textContent = mn.title;
+      const meta = document.createElement("div");
+      meta.className = "meta";
+      meta.textContent = [
+        formatDate(mn.date, { month: "short", day: "numeric", year: "numeric" }),
+        MENTION_ROLES[mn.role] || null,
+        fmtValue(mn.valueUsd),
+      ].filter(Boolean).join(" · ");
+      btn.append(h4, meta);
+      list.appendChild(btn);
+    }
+    wrap.appendChild(list);
   }
 }
 

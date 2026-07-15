@@ -174,6 +174,19 @@ a { color: inherit; }
 .tabs a.active { color: var(--ink); border-bottom-color: var(--accent); }
 .tabs a:hover { color: var(--ink); }
 
+/* six tabs on a phone: tighten tracking/gaps and allow a quiet overflow scroll */
+@media (max-width: 700px) {
+  .tabs {
+    justify-content: space-between;
+    gap: 8px;
+    overflow-x: auto;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+  .tabs::-webkit-scrollbar { display: none; }
+  .tabs a { font-size: 10.5px; letter-spacing: 0.9px; white-space: nowrap; }
+}
+
 /* ---------- Layout ---------- */
 main {
   max-width: var(--page);
@@ -478,6 +491,95 @@ main {
 @media (prefers-color-scheme: dark) {
   .leaflet-control-attribution { background: rgba(16,18,20,0.7) !important; color: var(--ink-3) !important; }
 }
+
+/* ---------- Players ---------- */
+.players-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.player-search {
+  flex: 1 1 150px;
+  min-width: 0;
+  font: inherit;
+  font-size: 12px;
+  color: var(--ink);
+  background: var(--box);
+  border: 1px solid var(--rule);
+  border-radius: 99px;
+  padding: 6px 12px;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.player-search:focus { outline: none; border-color: var(--ink-3); }
+.player-search::placeholder { color: var(--ink-3); }
+
+.player-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+@media (max-width: 700px) {
+  .player-grid { grid-template-columns: 1fr; }
+}
+
+.player-card {
+  display: block;
+  text-align: left;
+  background: var(--box);
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  padding: 14px 16px;
+  transition: border-color 0.12s ease;
+}
+
+.player-card:hover { border-color: var(--ink-3); }
+.player-card h3 { font-family: var(--serif); font-size: 15.5px; line-height: 1.25; letter-spacing: -0.1px; }
+
+.player-kicker {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 1.1px;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  margin-top: 3px;
+}
+
+.player-card p { font-size: 12.5px; line-height: 1.45; color: var(--ink-2); margin-top: 6px; }
+.player-card .meta { margin-top: 9px; font-size: 11px; color: var(--ink-3); }
+
+.players-hint { margin-top: 16px; font-size: 11px; color: var(--ink-3); }
+
+/* profile */
+.player-back { font-size: 12px; font-weight: 600; color: var(--ink-2); padding: 4px 0; }
+.player-back:hover { color: var(--accent); }
+
+.player-name {
+  font-family: var(--serif);
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: -0.3px;
+  line-height: 1.15;
+  margin-top: 8px;
+}
+
+.player-roleline { font-size: 12.5px; color: var(--ink-2); margin-top: 4px; }
+
+.player-tiles { margin-top: 14px; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); }
+.player-tiles .rt-value { font-size: 17px; margin-top: 3px; }
+
+.player-dossier { margin-top: 16px; max-width: 620px; }
+.player-dossier p { font-size: 14px; line-height: 1.6; }
+.player-dossier p + p { margin-top: 10px; }
+.player-dossier + .chips { margin-top: 12px; }
+
+.player-org-link { cursor: pointer; }
+.player-org-link:hover { border-color: var(--accent); color: var(--accent); }
 
 /* ---------- Rates ---------- */
 .rate-tiles {
