@@ -847,6 +847,35 @@ const MENTION_ROLES = {
   lender: "Lender", borrower: "Borrower", landlord: "Landlord", tenant: "Tenant", broker: "Broker",
 };
 
+/* Avatar: profile image when the pipeline sourced one (company logo, Wikimedia
+   headshot), otherwise a deterministic initials monogram — never a broken image. */
+const AVATAR_COLORS = ["#5b7ea8", "#7a6ba8", "#5f8f6b", "#a87f5b", "#a85b6e", "#5b9aa8", "#8f8a5e", "#75808c"];
+
+function playerAvatar(p, big) {
+  const el = document.createElement("div");
+  el.className = "player-avatar" + (big ? " big" : "") + (p.type === "person" ? " photo" : "");
+  const monogram = () => {
+    el.classList.add("mono");
+    const initials = p.name.split(/\s+/).filter((w) => /^[A-Za-z0-9]/.test(w))
+      .slice(0, 2).map((w) => w[0].toUpperCase()).join("");
+    let h = 0;
+    for (const ch of p.name) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+    el.style.background = AVATAR_COLORS[h % AVATAR_COLORS.length];
+    el.textContent = initials;
+  };
+  if (p.image) {
+    const img = document.createElement("img");
+    img.src = p.image;
+    img.alt = "";
+    img.loading = "lazy";
+    img.addEventListener("error", () => { img.remove(); monogram(); });
+    el.appendChild(img);
+  } else {
+    monogram();
+  }
+  return el;
+}
+
 async function renderPlayers() {
   const wrap = $("players-content");
   wrap.innerHTML = "";
@@ -954,15 +983,21 @@ function playerCard(p) {
   el.className = "player-card";
   el.addEventListener("click", () => { location.hash = `/player/${p.slug}`; });
 
+  const head = document.createElement("div");
+  head.className = "player-card-head";
+  const id = document.createElement("div");
+  id.className = "player-card-id";
   const h3 = document.createElement("h3");
   h3.textContent = p.name;
-  el.appendChild(h3);
+  id.appendChild(h3);
 
   const kicker = document.createElement("div");
   kicker.className = "player-kicker";
   const showOrg = p.type === "person" && p.org && !(p.role || "").toLowerCase().includes(p.org.toLowerCase());
   kicker.textContent = [p.role, showOrg ? p.org : null].filter(Boolean).join(" · ");
-  el.appendChild(kicker);
+  id.appendChild(kicker);
+  head.append(playerAvatar(p, false), id);
+  el.appendChild(head);
 
   if (p.tagline) {
     const tag = document.createElement("p");
@@ -1001,15 +1036,18 @@ async function renderPlayerProfile(slug) {
   back.addEventListener("click", () => { location.hash = "/players"; });
   wrap.appendChild(back);
 
+  const head = document.createElement("div");
+  head.className = "player-head";
+  const id = document.createElement("div");
   const name = document.createElement("h1");
   name.className = "player-name";
   name.textContent = p.name;
-  wrap.appendChild(name);
-
   const roleLine = document.createElement("p");
   roleLine.className = "player-roleline";
   roleLine.textContent = p.role || (p.type === "person" ? "Person" : "Company");
-  wrap.appendChild(roleLine);
+  id.append(name, roleLine);
+  head.append(playerAvatar(p, true), id);
+  wrap.appendChild(head);
 
   // person → firm cross-link when the firm has its own profile
   if (p.type === "person" && p.org) {
