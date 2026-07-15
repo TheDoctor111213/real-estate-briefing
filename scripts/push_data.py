@@ -58,6 +58,14 @@ def push_players(path: pathlib.Path) -> None:
     print(f"pushed {len(players)} players")
 
 
+def push_terms(path: pathlib.Path) -> None:
+    doc = json.loads(path.read_text())
+    terms = doc.get("terms", {})
+    for slug, entry in terms.items():
+        upsert("terms", {"slug": slug, "data": entry, "updated_at": doc.get("generatedAt")})
+    print(f"pushed {len(terms)} terms")
+
+
 def main() -> None:
     only = sys.argv[1] if len(sys.argv) > 1 else None
     days = sorted(DATA.glob("????-??-??.json"))
@@ -71,7 +79,10 @@ def main() -> None:
     players = DATA / "players.json"
     if players.exists():
         push_players(players)  # the roster rides along on every publish
-    if not days and not weeks and not players.exists():
+    terms = DATA / "terms.json"
+    if terms.exists():
+        push_terms(terms)  # the dictionary rides along on every publish
+    if not days and not weeks and not players.exists() and not terms.exists():
         print("nothing to push")
 
 

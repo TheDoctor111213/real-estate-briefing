@@ -11,10 +11,28 @@ scheduled task to populate each story's "content" field for the in-app reader.
 import json
 import re
 import sys
+import urllib.parse
 import urllib.request
 from html.parser import HTMLParser
 
 UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36"
+
+SUPABASE_URL = "https://uhwdnmbxiopfysodydty.supabase.co"
+ANON_KEY = "sb_publishable_LEQ5_-jjcRRl2p0wlaiXcw_RX4Wf8-y"
+
+
+def _trd_cookie() -> str | None:
+    """Subscriber session for therealdeal.com, stored by scripts/trd_session.py."""
+    try:
+        req = urllib.request.Request(
+            f"{SUPABASE_URL}/rest/v1/secrets?id=eq.trd_session&select=data",
+            headers={"apikey": ANON_KEY, "Authorization": f"Bearer {ANON_KEY}"},
+        )
+        with urllib.request.urlopen(req, timeout=15) as r:
+            rows = json.load(r)
+        return rows[0]["data"]["cookie"] if rows else None
+    except Exception:
+        return None
 
 KEEP = {"p", "h2", "h3", "blockquote", "ul", "ol", "li", "img", "figure", "figcaption"}
 DROP_SUBTREES = {"script", "style", "noscript", "iframe", "form", "aside", "nav", "footer", "header", "svg", "button"}
@@ -92,7 +110,13 @@ class ArticleExtractor(HTMLParser):
 
 
 def extract(url: str) -> dict:
-    req = urllib.request.Request(url, headers={"User-Agent": UA, "Accept": "text/html"})
+    headers = {"User-Agent": UA, "Accept": "text/html"}
+    is_trd = "therealdeal.com" in urllib.parse.urlparse(url).netloc
+    if is_trd:
+        cookie = _trd_cookie()
+        if cookie:
+            headers["Cookie"] = cookie
+    req = urllib.request.Request(url, headers=headers)
     with urllib.request.urlopen(req, timeout=30) as resp:
         raw = resp.read()
     html = raw.decode("utf-8", errors="replace")
@@ -105,13 +129,18 @@ def extract(url: str) -> dict:
     body = re.sub(r"<(p|h2|h3|li|blockquote)>\s*</\1>", "", body)
     body = re.sub(r"[ \t]+", " ", body)
     words = len(re.sub(r"<[^>]+>", " ", body).split())
-    return {
+    out = {
         "ok": words > 120,
         "title": p.title,
         "image": p.og_image,
         "html": body.strip(),
         "words": words,
     }
+    # a short TRD result usually means the session cookie is missing/expired —
+    # surface it so the pipeline can flag it in the day's notes
+    if is_trd and not out["ok"]:
+        out["paywalled"] = True
+    return out
 
 
 if __name__ == "__main__":

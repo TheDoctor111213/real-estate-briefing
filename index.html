@@ -9,7 +9,7 @@
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🗞️</text></svg>">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
   <!-- bump ?v= on every deploy so cached pages can never pair old code with new data -->
-  <link rel="stylesheet" href="css/style.css?v=12">
+  <link rel="stylesheet" href="css/style.css?v=13">
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" defer></script>
 </head>
 <body>
@@ -19,7 +19,7 @@
       <a class="wordmark" href="#/">Real Estate&nbsp;Briefing</a>
       <nav class="date-nav" id="date-nav" aria-label="Change day">
         <button id="prev-day" class="nav-arrow" aria-label="Previous day">‹</button>
-        <span id="current-date"></span>
+        <a id="current-date" href="#/history" aria-label="View briefing history"></a>
         <button id="next-day" class="nav-arrow" aria-label="Next day">›</button>
       </nav>
     </div>
@@ -29,7 +29,7 @@
         <a href="#/map" data-tab="map">Map</a>
         <a href="#/weekly" data-tab="weekly">Weekly</a>
         <a href="#/players" data-tab="players">Players</a>
-        <a href="#/history" data-tab="history">History</a>
+        <a href="#/dictionary" data-tab="dictionary">Dictionary</a>
         <a href="#/rates" data-tab="rates">Rates</a>
       </nav>
       <a id="rate-strip" class="rate-strip" href="#/rates" hidden></a>
@@ -75,7 +75,12 @@
       <div id="players-content"></div>
     </section>
 
-    <!-- History -->
+    <!-- Dictionary -->
+    <section id="view-dictionary" class="view" hidden>
+      <div id="dictionary-content"></div>
+    </section>
+
+    <!-- History (reached via the masthead date, not a tab) -->
     <section id="view-history" class="view" hidden>
       <div id="history-list"></div>
     </section>
@@ -98,6 +103,7 @@
       <p class="reader-meta" id="reader-meta"></p>
       <figure class="reader-hero" id="reader-hero" hidden><img id="reader-hero-img" alt=""></figure>
       <div class="reader-body" id="reader-body"></div>
+      <aside class="reader-explainer" id="reader-explainer" hidden></aside>
       <div class="reader-end">
         <a id="reader-original-end" href="#" target="_blank" rel="noopener">Read at the source ↗</a>
       </div>
@@ -106,6 +112,6 @@
 
   <div id="toast" role="status"></div>
 
-  <script src="js/app.js?v=12"></script>
+  <script src="js/app.js?v=13"></script>
 </body>
 </html>

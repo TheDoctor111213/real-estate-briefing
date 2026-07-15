@@ -1,5 +1,7 @@
-/* Real Estate Briefing — views: briefing / map / weekly / players / history / rates, plus reader overlay.
-   Hash routes: #/ · #/day/DATE · #/story/DATE/ID · #/map · #/weekly · #/players · #/player/SLUG · #/history · #/rates
+/* Real Estate Briefing — views: briefing / map / weekly / players / dictionary / history / rates, plus reader overlay.
+   Hash routes: #/ · #/day/DATE · #/story/DATE/ID · #/map · #/weekly · #/players · #/player/SLUG ·
+                #/dictionary · #/term/SLUG · #/history · #/rates
+   History has no tab of its own — it's reached by tapping the masthead date. It still gets a hash route.
    Data lives in Supabase (public-read); the pipeline upserts via scripts/push_data.py. */
 
 const SUPABASE_URL = "https://uhwdnmbxiopfysodydty.supabase.co";
@@ -56,6 +58,10 @@ const state = {
   playerType: "people",   // "people" | "companies"
   playerSort: "active",   // "active" | "volume" | "az"
   playerQuery: "",
+  terms: null,         // slug -> term (dictionary)
+  termCategory: null,  // null = all, otherwise a category label
+  termSort: "az",       // "az" | "recent" | "mentions"
+  termQuery: "",
   rateChart: "curve",  // "curve" | "forward" | "history"
   histKey: null,       // which pane's trend is showing: "5Y" | "10Y" | "30Y" | "SOFR"
   histRange: "3M",     // "1M" | "3M" | "6M" | "1Y"
@@ -98,13 +104,20 @@ async function init() {
     resizeTimer = setTimeout(() => { if (!$("view-rates").hidden) renderRates(); }, 200);
   });
   $("reader-back").addEventListener("click", () => closeReaderNav());
-  // entity links live inside clickable cards; capture phase wins over the card's own click
+  // entity/term links live inside clickable cards; capture phase wins over the card's own click
   document.addEventListener("click", (e) => {
-    const link = e.target.closest?.(".entity-link");
-    if (link) {
+    const entity = e.target.closest?.(".entity-link");
+    if (entity) {
       e.preventDefault();
       e.stopPropagation();
-      location.hash = `/player/${link.dataset.slug}`;
+      location.hash = `/player/${entity.dataset.slug}`;
+      return;
+    }
+    const term = e.target.closest?.(".term-link");
+    if (term) {
+      e.preventDefault();
+      e.stopPropagation();
+      location.hash = `/term/${term.dataset.slug}`;
     }
   }, true);
   $("map-mode-day").addEventListener("click", () => setMapMode("day"));
@@ -159,6 +172,7 @@ async function refreshData(silent) {
     const wk = state.weeks[state.weeks.length - 1];
     if (wk) state.weeksData.delete(wk);
     state.players = null; // roster refetches next time the Players view opens
+    state.terms = null;   // dictionary refetches next time the Dictionary view opens
 
     const fresh = target ? await getDay(target) : null;
     state.currentDate = target;
@@ -210,6 +224,12 @@ function route() {
   } else if (h === "#/players") {
     showView("players");
     renderPlayers();
+  } else if ((m = h.match(/^#\/term\/([\w-]+)$/))) {
+    showView("dictionary");
+    renderTermProfile(m[1]);
+  } else if (h === "#/dictionary") {
+    showView("dictionary");
+    renderDictionary();
   } else if (h === "#/history") {
     showView("history");
     renderHistory();
@@ -870,6 +890,19 @@ async function getPlayers() {
   return m;
 }
 
+async function getTerms() {
+  if (state.terms) return state.terms;
+  const m = new Map();
+  try {
+    const rows = await sb("terms?select=slug,data");
+    for (const r of rows) {
+      if (r.data?.term) m.set(r.slug, { slug: r.slug, ...r.data });
+    }
+  } catch { /* leave empty */ }
+  state.terms = m;
+  return m;
+}
+
 function daysSince(iso) {
   if (!iso) return 9999;
   const [y, mo, d] = iso.split("-").map(Number);
@@ -916,35 +949,43 @@ function playerAvatar(p, big) {
   return el;
 }
 
-/* ---------- entity linking ----------
-   Any roster name appearing in prose (articles, summaries, ledes, dossiers)
-   becomes a tap-through to that player's profile. Matching is case-sensitive
-   ("Compass" the brokerage, not "compass"), longest-name-first, first
-   occurrence per block, and skips text already inside a link. */
+/* ---------- entity + term linking ----------
+   Any roster name, and any dictionary term, appearing in prose (articles,
+   summaries, ledes, dossiers) becomes a tap-through — to a player's profile
+   or a term's dictionary entry. Matching is case-sensitive ("Compass" the
+   brokerage, not "compass"), longest-name-first, first occurrence per block,
+   and skips text already inside a link. Entities and terms share one pass
+   over the text but render as differently-styled spans (.entity-link vs
+   .term-link) so terms read as quieter, secondary links. */
 
 function escapeRegex(s) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function entityIndex(players) {
-  if (state.entityIdx && state.entityIdx.forSize === players.size) return state.entityIdx;
+function entityIndex(players, terms) {
+  if (state.entityIdx && state.entityIdx.forSize === players.size && state.entityIdx.forTermSize === terms.size) {
+    return state.entityIdx;
+  }
   const map = new Map();
-  const add = (name, slug) => {
+  const add = (name, slug, kind) => {
     if (!name || name.length < 3 || map.has(name)) return;
-    map.set(name, slug);
-    if (name.includes("'")) map.set(name.replace(/'/g, "’"), slug); // curly-quote variant
+    map.set(name, { slug, kind });
+    if (name.includes("'")) map.set(name.replace(/'/g, "’"), { slug, kind }); // curly-quote variant
   };
   // full names first so they always beat another entity's alias or surname
-  for (const p of players.values()) add(p.name, p.slug);
-  for (const p of players.values()) for (const a of p.aliases || []) add(a, p.slug);
+  for (const p of players.values()) add(p.name, p.slug, "player");
+  for (const p of players.values()) for (const a of p.aliases || []) add(a, p.slug, "player");
   for (const p of players.values()) {
     // bare-surname shorthand ("Whittall said…"), simple two-word names only
     const words = p.name.split(/\s+/);
-    if (p.type === "person" && words.length === 2 && words[1].length >= 4) add(words[1], p.slug);
+    if (p.type === "person" && words.length === 2 && words[1].length >= 4) add(words[1], p.slug, "player");
   }
+  for (const t of terms.values()) add(t.term, t.slug, "term");
+  for (const t of terms.values()) for (const a of t.aliases || []) add(a, t.slug, "term");
   const alts = [...map.keys()].sort((a, b) => b.length - a.length).map(escapeRegex);
   state.entityIdx = {
     forSize: players.size,
+    forTermSize: terms.size,
     map,
     regex: alts.length ? new RegExp(`(?<![A-Za-z0-9])(?:${alts.join("|")})(?![A-Za-z0-9])`, "g") : null,
   };
@@ -953,16 +994,18 @@ function entityIndex(players) {
 
 function linkifyElement(root, excludeSlug) {
   if (!root) return;
-  getPlayers().then((players) => {
-    if (!players.size || !root.isConnected) return;
-    const { regex, map } = entityIndex(players);
+  Promise.all([getPlayers(), getTerms()]).then(([players, terms]) => {
+    if ((!players.size && !terms.size) || !root.isConnected) return;
+    const { regex, map } = entityIndex(players, terms);
     if (!regex) return;
     const seen = new Set();
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
       acceptNode(n) {
         if (!n.nodeValue || n.nodeValue.length < 3) return NodeFilter.FILTER_REJECT;
         for (let el = n.parentElement; el && el !== root; el = el.parentElement) {
-          if (el.tagName === "A" || el.classList.contains("entity-link")) return NodeFilter.FILTER_REJECT;
+          if (el.tagName === "A" || el.classList.contains("entity-link") || el.classList.contains("term-link")) {
+            return NodeFilter.FILTER_REJECT;
+          }
         }
         return NodeFilter.FILTER_ACCEPT;
       },
@@ -974,14 +1017,14 @@ function linkifyElement(root, excludeSlug) {
       regex.lastIndex = 0;
       let m, frag = null, last = 0;
       while ((m = regex.exec(text))) {
-        const slug = map.get(m[0]);
-        if (!slug || slug === excludeSlug || seen.has(slug)) continue;
-        seen.add(slug);
+        const hit = map.get(m[0]);
+        if (!hit || hit.slug === excludeSlug || seen.has(hit.slug)) continue;
+        seen.add(hit.slug);
         if (!frag) frag = document.createDocumentFragment();
         frag.appendChild(document.createTextNode(text.slice(last, m.index)));
         const s = document.createElement("span");
-        s.className = "entity-link";
-        s.dataset.slug = slug;
+        s.className = hit.kind === "term" ? "term-link" : "entity-link";
+        s.dataset.slug = hit.slug;
         s.textContent = m[0];
         frag.appendChild(s);
         last = m.index + m[0].length;
@@ -1252,6 +1295,229 @@ async function renderPlayerProfile(slug) {
   }
 }
 
+/* ---------- dictionary ---------- */
+
+function termScore(t) {
+  return (t.mentions || []).reduce((sum, mn) => sum + 1 / (1 + daysSince(mn.date) / 45), 0);
+}
+
+async function renderDictionary() {
+  const wrap = $("dictionary-content");
+  wrap.innerHTML = "";
+  const terms = await getTerms();
+
+  if (!terms.size) {
+    const p = document.createElement("p");
+    p.style.cssText = "font-style:italic;color:var(--ink-2);padding:40px 0;text-align:center";
+    p.textContent = "No terms yet — the dictionary builds as jargon shows up in coverage.";
+    wrap.appendChild(p);
+    return;
+  }
+
+  const all = [...terms.values()];
+  const categories = [...new Set(all.map((t) => t.category).filter(Boolean))].sort();
+
+  const bar = document.createElement("div");
+  bar.className = "players-bar";
+
+  const search = document.createElement("input");
+  search.className = "player-search";
+  search.type = "search";
+  search.placeholder = "Search terms, definitions…";
+  search.value = state.termQuery;
+  search.addEventListener("input", () => { state.termQuery = search.value; renderTermList(all); });
+
+  const cat = document.createElement("select");
+  cat.className = "ctl-select";
+  const anyOpt = document.createElement("option");
+  anyOpt.value = "";
+  anyOpt.textContent = "All categories";
+  cat.appendChild(anyOpt);
+  for (const c of categories) {
+    const o = document.createElement("option");
+    o.value = c;
+    o.textContent = c;
+    cat.appendChild(o);
+  }
+  cat.value = state.termCategory || "";
+  cat.addEventListener("change", () => { state.termCategory = cat.value || null; renderTermList(all); });
+
+  const sort = document.createElement("select");
+  sort.className = "ctl-select";
+  for (const [val, label] of [["az", "A–Z"], ["recent", "Most active"], ["mentions", "Most mentioned"]]) {
+    const o = document.createElement("option");
+    o.value = val;
+    o.textContent = label;
+    sort.appendChild(o);
+  }
+  sort.value = state.termSort;
+  sort.addEventListener("change", () => { state.termSort = sort.value; renderTermList(all); });
+
+  bar.append(search, cat, sort);
+  wrap.appendChild(bar);
+
+  const list = document.createElement("div");
+  list.id = "term-list";
+  wrap.appendChild(list);
+
+  const hint = document.createElement("p");
+  hint.className = "players-hint";
+  hint.textContent = "Jargon and concepts from the newsletters, explained plainly. Builds as coverage accumulates.";
+  wrap.appendChild(hint);
+
+  renderTermList(all);
+}
+
+function renderTermList(all) {
+  const listWrap = $("term-list");
+  if (!listWrap) return;
+  listWrap.innerHTML = "";
+
+  const q = state.termQuery.trim().toLowerCase();
+  let list = all;
+  if (state.termCategory) list = list.filter((t) => t.category === state.termCategory);
+  if (q) {
+    list = list.filter((t) =>
+      [t.term, t.category, t.shortDef, t.definition, ...(t.aliases || [])]
+        .filter(Boolean).join(" ").toLowerCase().includes(q)
+    );
+  }
+
+  if (state.termSort === "mentions") {
+    list.sort((a, b) => (b.stats?.mentions || (b.mentions || []).length) - (a.stats?.mentions || (a.mentions || []).length));
+  } else if (state.termSort === "recent") {
+    list.sort((a, b) => termScore(b) - termScore(a));
+  } else {
+    list.sort((a, b) => a.term.localeCompare(b.term));
+  }
+
+  if (!list.length) {
+    const p = document.createElement("p");
+    p.style.cssText = "font-style:italic;color:var(--ink-2);padding:30px 0;text-align:center";
+    p.textContent = "No matches.";
+    listWrap.appendChild(p);
+    return;
+  }
+
+  const grid = document.createElement("div");
+  grid.className = "player-grid";
+  for (const t of list) grid.appendChild(termCard(t));
+  listWrap.appendChild(grid);
+}
+
+function termCard(t) {
+  const el = document.createElement("button");
+  el.className = "player-card term-card";
+  el.addEventListener("click", () => { location.hash = `/term/${t.slug}`; });
+
+  const h3 = document.createElement("h3");
+  h3.textContent = t.term;
+  el.appendChild(h3);
+
+  if (t.category) {
+    const kicker = document.createElement("div");
+    kicker.className = "player-kicker";
+    kicker.textContent = t.category;
+    el.appendChild(kicker);
+  }
+
+  if (t.shortDef) {
+    const p = document.createElement("p");
+    p.textContent = t.shortDef;
+    el.appendChild(p);
+  }
+
+  const meta = document.createElement("div");
+  meta.className = "meta";
+  const n = t.stats?.mentions || (t.mentions || []).length;
+  const last = t.stats?.lastSeen || t.mentions?.[0]?.date;
+  meta.textContent = `${n} mention${n === 1 ? "" : "s"}` + (last ? ` · last ${formatDate(last, { month: "short", day: "numeric" })}` : "");
+  el.appendChild(meta);
+
+  return el;
+}
+
+async function renderTermProfile(slug) {
+  const wrap = $("dictionary-content");
+  wrap.innerHTML = "";
+  const terms = await getTerms();
+  const t = terms.get(slug);
+  if (!t) { location.hash = "/dictionary"; return; }
+
+  const back = document.createElement("button");
+  back.className = "player-back";
+  back.textContent = "‹ All terms";
+  back.addEventListener("click", () => { location.hash = "/dictionary"; });
+  wrap.appendChild(back);
+
+  const name = document.createElement("h1");
+  name.className = "player-name";
+  name.style.marginTop = "12px";
+  name.textContent = t.term;
+  wrap.appendChild(name);
+
+  if (t.category) {
+    const roleLine = document.createElement("p");
+    roleLine.className = "player-roleline";
+    roleLine.textContent = t.category;
+    wrap.appendChild(roleLine);
+  }
+
+  const tiles = document.createElement("div");
+  tiles.className = "rate-tiles player-tiles";
+  const n = t.stats?.mentions || (t.mentions || []).length;
+  const cells = [
+    ["Mentions", String(n)],
+    ["First seen", t.stats?.firstSeen ? formatDate(t.stats.firstSeen, { month: "short", day: "numeric" }) : "—"],
+    ["Last seen", t.stats?.lastSeen ? formatDate(t.stats.lastSeen, { month: "short", day: "numeric" }) : "—"],
+  ];
+  for (const [label, value] of cells) {
+    const tile = document.createElement("div");
+    tile.className = "rate-tile";
+    const l = document.createElement("div");
+    l.className = "rt-label";
+    l.textContent = label;
+    const v = document.createElement("div");
+    v.className = "rt-value";
+    v.textContent = value;
+    tile.append(l, v);
+    tiles.appendChild(tile);
+  }
+  wrap.appendChild(tiles);
+
+  if (t.definition) {
+    const dossier = document.createElement("div");
+    dossier.className = "player-dossier";
+    for (const para of t.definition.split(/\n+/).filter(Boolean)) {
+      const el = document.createElement("p");
+      el.textContent = para;
+      dossier.appendChild(el);
+    }
+    linkifyElement(dossier, t.slug);
+    wrap.appendChild(dossier);
+  }
+
+  const mentions = (t.mentions || []).slice().sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+  if (mentions.length) {
+    wrap.appendChild(sectionHead("Seen in"));
+    const list = document.createElement("div");
+    list.className = "week-stories";
+    for (const mn of mentions) {
+      const btn = document.createElement("button");
+      btn.className = "week-story";
+      btn.addEventListener("click", () => { location.hash = `/story/${mn.date}/${mn.id}`; });
+      const h4 = document.createElement("h4");
+      h4.textContent = mn.title;
+      const meta = document.createElement("div");
+      meta.className = "meta";
+      meta.textContent = formatDate(mn.date, { month: "short", day: "numeric", year: "numeric" });
+      btn.append(h4, meta);
+      list.appendChild(btn);
+    }
+    wrap.appendChild(list);
+  }
+}
+
 /* ---------- rates ---------- */
 
 const TENOR_MONTHS = { "1M": 1, "2M": 2, "3M": 3, "4M": 4, "6M": 6, "1Y": 12, "2Y": 24, "3Y": 36, "5Y": 60, "7Y": 84, "10Y": 120, "20Y": 240, "30Y": 360 };
@@ -1474,6 +1740,77 @@ function renderRates() {
   wrap.appendChild(note);
 }
 
+/* ---------- chart scrubbing ----------
+   Hold and drag (or hover, on desktop) anywhere on a rate chart: a vertical
+   crosshair snaps to the nearest data point and a flag shows its exact
+   label/date and rate. One engine serves all three chart types; each builder
+   passes its own points [{x, y, label, value}] in viewBox coordinates. */
+
+function attachScrub(svg, pts, geom) {
+  if (!pts || pts.length < 2) return;
+  const ns = "http://www.w3.org/2000/svg";
+  const { W, H, padT, padB, padL, padR, k } = geom;
+  const mk = (tag, attrs) => {
+    const el = document.createElementNS(ns, tag);
+    for (const [a, v] of Object.entries(attrs)) el.setAttribute(a, v);
+    return el;
+  };
+
+  const layer = mk("g", { class: "scrub-layer" });
+  layer.style.display = "none";
+  const line = mk("line", { class: "scrub-line", y1: padT, y2: H - padB, "stroke-width": 1 * k });
+  const dot = mk("circle", { class: "scrub-dot", r: 4.5 * k, "stroke-width": 2 * k });
+  const flagBg = mk("rect", { class: "scrub-flag-bg", rx: 6 * k, height: 38 * k, y: padT + 2 });
+  const flagLabel = mk("text", { class: "scrub-flag-label", "font-size": 10 * k, y: padT + 2 + 15 * k });
+  const flagValue = mk("text", { class: "scrub-flag-value", "font-size": 13 * k, y: padT + 2 + 31 * k });
+  layer.append(line, dot, flagBg, flagLabel, flagValue);
+  svg.appendChild(layer);
+
+  // the rates page fits one screen with no scrolling, so owning all touch
+  // gestures over the chart is safe — it's what makes the scrub feel smooth
+  svg.style.touchAction = "none";
+  svg.style.cursor = "crosshair";
+
+  const show = (clientX) => {
+    const rect = svg.getBoundingClientRect();
+    if (!rect.width) return;
+    const vx = (clientX - rect.left) * (W / rect.width);
+    let best = pts[0], bd = Infinity;
+    for (const p of pts) {
+      const d = Math.abs(p.x - vx);
+      if (d < bd) { bd = d; best = p; }
+    }
+    layer.style.display = "";
+    line.setAttribute("x1", best.x);
+    line.setAttribute("x2", best.x);
+    dot.setAttribute("cx", best.x);
+    dot.setAttribute("cy", best.y);
+    flagLabel.textContent = best.label;
+    flagValue.textContent = best.value;
+    const w = Math.max(flagLabel.getBBox().width, flagValue.getBBox().width) + 18 * k;
+    flagBg.setAttribute("width", w);
+    // flag rides beside the line, flipping sides so it never leaves the chart
+    let fx = best.x + 11 * k;
+    if (fx + w > W - 4) fx = best.x - 11 * k - w;
+    flagBg.setAttribute("x", fx);
+    flagLabel.setAttribute("x", fx + 9 * k);
+    flagValue.setAttribute("x", fx + 9 * k);
+  };
+  const hide = () => { layer.style.display = "none"; };
+
+  svg.addEventListener("pointerdown", (e) => {
+    try { svg.setPointerCapture(e.pointerId); } catch { /* older Safari */ }
+    show(e.clientX);
+    e.preventDefault();
+  });
+  // no rAF throttle: rAF stalls in throttled/low-power contexts, and show()
+  // is cheap (nearest-point scan + one getBBox), so per-event updates are safe
+  svg.addEventListener("pointermove", (e) => show(e.clientX));
+  svg.addEventListener("pointerup", (e) => { if (e.pointerType !== "mouse") hide(); });
+  svg.addEventListener("pointercancel", hide);
+  svg.addEventListener("pointerleave", hide);
+}
+
 function buildCurveSvg(t) {
   const pts = Object.entries(TENOR_MONTHS)
     .filter(([k]) => t[k] != null)
@@ -1537,6 +1874,12 @@ function buildCurveSvg(t) {
     title.textContent = `${p.label}: ${p.rate.toFixed(2)}%`;
     hit.appendChild(title);
   }
+
+  attachScrub(
+    svg,
+    pts.map((p) => ({ x: xs(p.months), y: ys(p.rate), label: `${p.label} Treasury`, value: p.rate.toFixed(2) + "%" })),
+    { W, H, padT, padB, padL, padR, k }
+  );
 
   return svg;
 }
@@ -1628,6 +1971,12 @@ function buildForwardSvg(fwd, horizonMonths) {
     hit.appendChild(title);
   }
 
+  attachScrub(
+    svg,
+    pts.map((p) => ({ x: xs(p.m), y: ys(p.rate), label: p.m === 0 ? "Today (spot)" : `${fwdLabel(p.m)} · projected`, value: p.rate.toFixed(2) + "%" })),
+    { W, H, padT, padB, padL, padR, k }
+  );
+
   return svg;
 }
 
@@ -1705,6 +2054,18 @@ function buildHistorySvg(r, key, range) {
     hit.appendChild(title);
   }
 
+  // scrub snaps to every daily print, not just the sparse hover targets
+  attachScrub(
+    svg,
+    pts.map((p) => ({
+      x: xs(p.date),
+      y: ys(p.rate),
+      label: formatDate(p.date, { weekday: "short", month: "short", day: "numeric", year: "numeric" }),
+      value: p.rate.toFixed(2) + "%",
+    })),
+    { W, H, padT, padB, padL, padR, k }
+  );
+
   return svg;
 }
 
@@ -1749,6 +2110,24 @@ async function openReaderRoute(date, id) {
     body.appendChild(p);
   }
   linkifyElement(body);
+
+  // optional plain-English rewrite for dense stories — supplements the
+  // article above, never replaces it
+  const expl = $("reader-explainer");
+  expl.hidden = !story.explainer;
+  expl.innerHTML = "";
+  if (story.explainer) {
+    const label = document.createElement("div");
+    label.className = "explainer-label";
+    label.textContent = "In plain English";
+    expl.appendChild(label);
+    for (const para of story.explainer.split(/\n+/).filter(Boolean)) {
+      const p = document.createElement("p");
+      p.textContent = para;
+      expl.appendChild(p);
+    }
+    linkifyElement(expl);
+  }
 
   $("reader-original").href = story.url || "#";
   $("reader-original-end").href = story.url || "#";

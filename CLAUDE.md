@@ -1,16 +1,16 @@
 # Real Estate News Briefing
 
-A web app that compiles Matthew's real estate newsletters into a daily briefing with an in-app reader, deal map, weekly summary, players roster (accumulating people/company dossiers), and history archive.
+A web app that compiles Matthew's real estate newsletters into a daily briefing with an in-app reader, deal map, weekly summary, players roster (accumulating people/company dossiers), a dictionary of jargon/concepts, and a history archive.
 Static site (no build step): `index.html` + `css/style.css` + `js/app.js`, pipeline helpers in `scripts/`. Leaflet (CDN) powers the map.
 
 - **Hosting**: GitHub Pages, custom domain `briefing.pierrepontcompanies.com` (`CNAME` file). Deploys happen only when app code changes — data never requires a deploy. **When deploying js/css changes, bump the `?v=` query on both asset tags in `index.html`** — it prevents cached pages from pairing old code with new data shapes.
-- **Data**: Supabase project `uhwdnmbxiopfysodydty` (org ptxdileqdzaovbezrplg) — tables `days` (pk `date`, `data` jsonb, `generated_at`), `weeks` (pk `week_of`, `data` jsonb, `generated_at`), and `players` (pk `slug`, `data` jsonb, `updated_at`). RLS is open read AND open write on the publishable key (owner's accepted tradeoff, single-user app). The app reads it live via PostgREST.
+- **Data**: Supabase project `uhwdnmbxiopfysodydty` (org ptxdileqdzaovbezrplg) — tables `days` (pk `date`, `data` jsonb, `generated_at`), `weeks` (pk `week_of`, `data` jsonb, `generated_at`), `players` (pk `slug`, `data` jsonb, `updated_at`), and `terms` (pk `slug`, `data` jsonb, `updated_at`). RLS is open read AND open write on the publishable key (owner's accepted tradeoff, single-user app); DELETE is revoked at the DB level on all four tables. The app reads it live via PostgREST.
 - **Local dev**: the `briefing` config in `.claude/launch.json` (python3 http.server, port 8420) — the app reads Supabase either way. `data/` holds the pipeline's working JSON files and is gitignored (also keeps subscriber-only article text out of the public repo).
 
 ## Architecture
 
-1. Scheduled cloud routines on claude.ai (windows: 7:30, 8:00, 8:30, 9:00, 10:00 AM, 12:00, 2:00, 4:00 PM ET; hardware-independent — they run in Anthropic's cloud against this repo) read the day's real estate newsletters from Gmail, synthesizes ONE deduped story list, fetches full article text, geocodes deal locations, writes `data/YYYY-MM-DD.json`, updates the rolling week file `data/weeks/<monday>.json`, maintains `data/index.json` (`{dates: [], weeks: []}`), then **publishes with `python3 scripts/push_data.py`** (upserts days + weeks to Supabase). Runs are idempotent: each rebuilds today's file from ALL of today's emails (`after:` today, America/New_York — not `newer_than:1d`), keeping existing story ids stable.
-2. The app has six hash-routed views — Briefing (`#/day/DATE`), Map (`#/map`), Weekly (`#/weekly`), Players (`#/players`, profiles at `#/player/SLUG`), History (`#/history`), Rates (`#/rates`) — plus a full-screen reader overlay (`#/story/DATE/ID`). A masthead refresh button (and auto-refetch every 10 min / on tab focus) re-queries Supabase and re-renders when `generatedAt` changes; pulling NEW emails always happens through a task run, not the page.
+1. Scheduled cloud routines on claude.ai (windows: 7:30, 8:00, 8:30, 9:00, 10:00 AM, 12:00, 2:00, 4:00 PM ET; hardware-independent — they run in Anthropic's cloud against this repo) read the day's real estate newsletters from Gmail, synthesizes ONE deduped story list, fetches full article text, geocodes deal locations, writes `data/YYYY-MM-DD.json`, updates the rolling week file `data/weeks/<monday>.json`, maintains `data/index.json` (`{dates: [], weeks: []}`), then **publishes with `python3 scripts/push_data.py`** (upserts days + weeks + players + terms to Supabase). Runs are idempotent: each rebuilds today's file from ALL of today's emails (`after:` today, America/New_York — not `newer_than:1d`), keeping existing story ids stable.
+2. The app has six hash-routed views — Briefing (`#/day/DATE`), Map (`#/map`), Weekly (`#/weekly`), Players (`#/players`, profiles at `#/player/SLUG`), Dictionary (`#/dictionary`, entries at `#/term/SLUG`), Rates (`#/rates`) — plus History (`#/history`, reached by tapping the masthead date, not a tab) and a full-screen reader overlay (`#/story/DATE/ID`). A masthead refresh button (and auto-refetch every 10 min / on tab focus) re-queries Supabase and re-renders when `generatedAt` changes; pulling NEW emails always happens through a task run, not the page.
 
 ## Newsletter sources (Gmail senders)
 
@@ -35,6 +35,7 @@ Also include any other newsletter that is clearly real-estate news. Skip welcome
    - `valueUsd` — the single deal size in dollars as a plain number (e.g. 81400000); `null` when there is no single figure (permit recaps, roundups, policy pieces).
 5. **Geocode**: for stories tied to identifiable places (a property, site, submarket, or city), add `locations: [{label, lat, lng}]` — approximate coordinates from knowledge are fine (city/neighborhood precision; a specific address if confident). Stories with no meaningful geography (national policy, earnings) get `locations: []`.
 6. **Reader content** per story, in order of preference: (a) full story text extracted from the email body itself when the newsletter carries it (CRE Daily often does) — include `<figure>/<img>/<figcaption>`; (b) `python3 scripts/fetch_article.py <url>` → JSON `{ok, title, image, html, words}`; if `ok`, use `html` as `content` and `image` as hero; (c) neither → `content: null` (app falls back to summary + link).
+   - **The Real Deal (subscriber articles)**: fetch_article.py automatically sends the owner's TRD session cookie (stored in the Supabase `secrets` table, row `trd_session`, by `scripts/trd_session.py` which the owner runs locally — the pipeline never sees the password). If a therealdeal.com fetch returns `paywalled: true`, the session has expired: still write the story with `content: null`, and say in the day's `notes` that the TRD session needs a refresh (`python3 scripts/trd_session.py <email>`).
 7. Write `data/YYYY-MM-DD.json` (schema below). Create the `data/` directory if it doesn't exist. (`data/index.json` is a legacy local-dev artifact — ignore it if absent; the app reads Supabase, not files.)
 8. **Weekly rollup**: compute the week's Monday. Rewrite `data/weeks/<monday>.json` synthesizing ALL of that week's days so far (schema below) — synthesize across days, don't just concatenate. **In a fresh checkout (cloud runs) the earlier day files won't exist locally** — fetch them from Supabase instead: `GET <SUPABASE_URL>/rest/v1/days?date=gte.<monday>&date=lte.<today>&select=data` with the `apikey` header, using the URL and key found in `scripts/push_data.py`.
 9. **Players roster**: maintain the persistent people/companies dossier set behind the app's Players tab. Fetch the current roster from Supabase (`GET <SUPABASE_URL>/rest/v1/players?select=slug,data` with the `apikey` header), merge today's stories into it, write the complete result to `data/players.json` (schema below). Curation rules — these keep the roster valuable instead of unwieldy:
@@ -50,9 +51,17 @@ Also include any other newsletter that is clearly real-estate news. Skip welcome
      2. People: the Wikipedia thumbnail from `https://en.wikipedia.org/api/rest_v1/page/summary/<Title>` ONLY after checking the page description actually matches this person (namesakes are common).
      3. People/companies with no favicon or Wikipedia entry: find an official headshot or logo (the firm's own team/leadership page, the person's own site), download it, downscale to ≤400px, and **re-host it in the public `player-images` storage bucket** so it can never rot: `curl -X POST <SUPABASE_URL>/storage/v1/object/player-images/<slug>.<ext> -H "apikey: <key>" -H "Authorization: Bearer <key>" -H "Content-Type: image/<ext>" -H "x-upsert: true" --data-binary @file`, then store `<SUPABASE_URL>/storage/v1/object/public/player-images/<slug>.<ext>`. Never hotlink news-article or team-page photos directly — re-host them.
      `null` is always fine; the app renders an initials monogram. If `image` is null when an entity resurfaces, try again — a domain or team page may be identifiable from the new story.
-10. Validate all written files with `python3 -m json.tool`.
-11. **Publish**: `python3 scripts/push_data.py` — upserts every local day and week file plus `data/players.json` to Supabase. The hosted app updates within seconds (no deploy involved).
-12. **Rates**: `python3 scripts/fetch_rates.py` — pulls the daily Treasury par yield curve (treasury.gov) and SOFR + compounded averages (NY Fed), and publishes to the Supabase `rates` table. Feeds the app's Rates page and the masthead ticker. Run it every pipeline run; it's cheap and idempotent.
+10. **Dictionary**: maintain the persistent glossary behind the app's Dictionary tab. Fetch the current dictionary from Supabase (`GET <SUPABASE_URL>/rest/v1/terms?select=slug,data` with the `apikey` header), merge today's stories into it, write the complete result to `data/terms.json` (schema below). Curation rules:
+    - **Who gets an entry.** Jargon or concepts a smart reader without real-estate background wouldn't know: deal/finance mechanics (cap rate, mezzanine debt, DSCR, CMBS, defeasance, 1031 exchange), legal/regulatory constructs (FARE Act, TOPA, Ellis Act eviction), industry-specific structures (syndication, ground lease, triple net, opportunity zone). Skip plain English and anything already self-explanatory in context.
+    - **Who never enters.** Company/person names (that's the Players roster), plain financial terms a general-news reader already knows (mortgage, landlord, tenant), one-off proper nouns that won't recur.
+    - **Updating an existing entry.** Append today's mention(s) newest-first — mention history is kept forever, never trimmed. Refresh `stats.lastSeen`/`mentions`. Rewrite `definition`/`shortDef` only if today's usage reveals the existing explanation is wrong or incomplete; otherwise leave the prose alone.
+    - **Entries are permanent.** Never delete an entry or a mention — same DB-enforced guarantee as `players` (no DELETE grant on `terms`).
+    - **One slug per concept, forever.** Check for aliases before creating (e.g. "Cap Rate" vs "Capitalization Rate"). Never re-slug.
+    - **Aliases** (`aliases` field): alternate names/abbreviations the app auto-links wherever they appear in prose — e.g. "DSCR" for "Debt Service Coverage Ratio". Keep them unambiguous.
+    - **Category** (`category` field): a short reusable label — Valuation & Returns, Financing & Debt, Legal & Regulatory, Deal Structures, Market Mechanics, Tax — reuse existing ones before inventing.
+11. Validate all written files with `python3 -m json.tool`.
+12. **Publish**: `python3 scripts/push_data.py` — upserts every local day and week file plus `data/players.json` and `data/terms.json` to Supabase. The hosted app updates within seconds (no deploy involved).
+13. **Rates**: `python3 scripts/fetch_rates.py` — pulls the daily Treasury par yield curve (treasury.gov) and SOFR + compounded averages (NY Fed), and publishes to the Supabase `rates` table. Feeds the app's Rates page and the masthead ticker. Run it every pipeline run; it's cheap and idempotent.
 
 ## Data schema — `data/YYYY-MM-DD.json`
 
@@ -79,7 +88,8 @@ Also include any other newsletter that is clearly real-estate news. Skip welcome
       "url": "canonical article URL",
       "image": "hero image URL or null",
       "locations": [{ "label": "human-readable place", "lat": 0.0, "lng": 0.0 }],
-      "content": "<p>sanitized article HTML (p/h2/h3/blockquote/ul/ol/li/img/figure/figcaption) or null</p>"
+      "content": "<p>sanitized article HTML (p/h2/h3/blockquote/ul/ol/li/img/figure/figcaption) or null</p>",
+      "explainer": "plain-English rewrite for dense stories, rendered in a box UNDER the full article (see Writing style); null for most stories"
     }
   ],
   "notes": "optional: anything unusual (missing editions, new subscriptions)"
@@ -132,6 +142,29 @@ The whole roster in one file; `push_data.py` upserts each entry as its own `play
 }
 ```
 
+## Data schema — `data/terms.json`
+
+The whole dictionary in one file; `push_data.py` upserts each entry as its own `terms` row.
+
+```json
+{
+  "generatedAt": "ISO-8601 UTC",
+  "terms": {
+    "cap-rate": {
+      "term": "Cap Rate",
+      "category": "Valuation & Returns | Financing & Debt | Legal & Regulatory | Deal Structures | Market Mechanics | Tax",
+      "aliases": ["short alternate names/abbreviations for auto-linking in prose; [] if none"],
+      "shortDef": "one sentence, ≤25 words — for the dictionary card view",
+      "definition": "2–4 sentences, plain language, assumes no prior knowledge; separate paragraphs with \\n\\n",
+      "stats": { "mentions": 2, "firstSeen": "YYYY-MM-DD", "lastSeen": "YYYY-MM-DD" },
+      "mentions": [
+        { "date": "YYYY-MM-DD", "id": "story id in that day file", "title": "story headline" }
+      ]
+    }
+  }
+}
+```
+
 ## Writing style
 
 **Write for a smart reader who doesn't know any of the names — in as few words as possible.** Every company and person gets a compact identifying clause on first reference in any prose field: "Dallas syndicator S2 Capital", "ex-Buffett protégé Ian Jacobs", "Asana Partners, a Charlotte urban-retail specialist" — never a bare name, never a full sentence of biography. Assume no memory of prior days' coverage. Maximize information per word: keep every number, cut connective tissue. Targets: `overview` ≈ 100 words; each `keyPoint` ≤ 30 words.
@@ -142,7 +175,9 @@ The whole roster in one file; `push_data.py` upserts each entry as its own `play
 - `watch`: 1–3 forward-looking catalysts with dates ("Fed bill-purchase decision Aug. 13", "S2's five North Texas foreclosure auctions land this month"), ≤20 words each, drawn from today's and recent stories. Only include real, dated events — never vague "keep an eye on" items.
 - `summary` (per story): concrete who/what/how-much, actors identified the same way, in your own words.
 - `content` is mechanical extraction (email body or fetch_article.py output), not rewriting.
+- `explainer` (optional, per story): for stories whose article assumes mechanics a smart non-specialist wouldn't know — Fed plumbing, securitization/CMBS, rate math, legal/land-use structures — write 2–4 short paragraphs that re-tell the story plainly: what happened, how the mechanism works (define each moving part in a clause), and why it matters for real estate. End with the "so what". Separate paragraphs with \\n\\n. It renders in a box under the full article as a supplement, never a replacement. Most stories don't need one; add it only where the source text would genuinely lose a general reader — target 2–5 per day, null otherwise.
 - Section names stay short and reusable day-to-day.
+- `shortDef`/`definition` (dictionary terms): explain the mechanism, not just a synonym — a reader should understand *why* it matters, not just what to call it. No circular definitions ("a cap rate is a rate used to cap...").
 
 Bad (color, no context): "S2 Capital's $400M first fund collapses as the Sun Belt syndication unwind claims another victim."
 Bad (context, too wordy): "S2 Capital — a Dallas syndicator that built one of the Sun Belt's largest value-add apartment operations (roughly $11B transacted since 2012) on floating-rate debt — is dissolving its $400M first fund with zero return to investors."

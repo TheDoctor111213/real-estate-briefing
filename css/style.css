@@ -146,7 +146,15 @@ a { color: inherit; }
 
 .date-nav.off { visibility: hidden; }
 
-#current-date { min-width: 84px; text-align: center; font-variant-numeric: tabular-nums; }
+#current-date {
+  min-width: 84px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  text-decoration: none;
+  border-radius: 4px;
+  padding: 2px 4px;
+}
+#current-date:hover { color: var(--accent); background: var(--rule); }
 
 .nav-arrow { font-size: 18px; line-height: 1; color: var(--ink-2); padding: 8px 10px; margin: -6px 0; }
 .nav-arrow:hover:not(:disabled) { color: var(--accent); }
@@ -648,6 +656,17 @@ main {
 
 .entity-link:hover { border-bottom: 1px solid var(--accent); }
 
+/* term links: dictionary words in prose — present but quieter than entity links */
+.term-link {
+  color: var(--ink-2);
+  cursor: pointer;
+  text-decoration: none;
+  border-bottom: 1px dotted var(--rule);
+  transition: color 0.1s ease, border-color 0.1s ease;
+}
+
+.term-link:hover { color: var(--ink); border-bottom-color: var(--ink-3); }
+
 /* ---------- Rates ---------- */
 .rate-tiles {
   display: grid;
@@ -763,6 +782,37 @@ main {
 .cv-dot { fill: var(--box); stroke: var(--accent); stroke-width: 2; }
 .cv-dot.key { fill: var(--accent); }
 .cv-hit { fill: transparent; cursor: default; }
+
+/* plain-English explainer at the foot of dense articles */
+.reader-explainer {
+  max-width: var(--measure);
+  margin: 34px auto 0;
+  padding: 18px 20px;
+  background: var(--box);
+  border: 1px solid var(--rule);
+  border-left: 3px solid var(--accent);
+  border-radius: 8px;
+}
+
+.explainer-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1.4px;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 10px;
+}
+
+.reader-explainer p { font-size: 14.5px; line-height: 1.6; }
+.reader-explainer p + p { margin-top: 10px; }
+
+/* scrub crosshair: vertical line + snapped dot + readout flag */
+.scrub-layer { pointer-events: none; }
+.scrub-line { stroke: var(--ink-3); }
+.scrub-dot { fill: var(--accent); stroke: var(--box); }
+.scrub-flag-bg { fill: var(--ink); opacity: 0.94; }
+.scrub-flag-label { fill: var(--bg); opacity: 0.72; font-weight: 600; }
+.scrub-flag-value { fill: var(--bg); font-weight: 700; font-variant-numeric: tabular-nums; }
 .cv-ylabel, .cv-xlabel { font-size: 10px; fill: var(--ink-3); font-family: var(--sans); }
 .cv-vlabel { font-size: 11px; font-weight: 700; fill: var(--ink); font-family: var(--sans); }
 
