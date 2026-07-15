@@ -98,6 +98,15 @@ async function init() {
     resizeTimer = setTimeout(() => { if (!$("view-rates").hidden) renderRates(); }, 200);
   });
   $("reader-back").addEventListener("click", () => closeReaderNav());
+  // entity links live inside clickable cards; capture phase wins over the card's own click
+  document.addEventListener("click", (e) => {
+    const link = e.target.closest?.(".entity-link");
+    if (link) {
+      e.preventDefault();
+      e.stopPropagation();
+      location.hash = `/player/${link.dataset.slug}`;
+    }
+  }, true);
   $("map-mode-day").addEventListener("click", () => setMapMode("day"));
   $("map-mode-all").addEventListener("click", () => setMapMode("all"));
   window.addEventListener("hashchange", route);
@@ -260,6 +269,7 @@ async function renderBriefing(date) {
 
   $("lede-block").hidden = !day.overview && !(day.keyPoints || []).length;
   $("lede").textContent = day.overview || "";
+  linkifyElement($("lede"));
   const kp = $("key-points");
   kp.innerHTML = "";
   for (const point of day.keyPoints || []) {
@@ -267,6 +277,7 @@ async function renderBriefing(date) {
     li.textContent = point;
     kp.appendChild(li);
   }
+  linkifyElement(kp);
 
   if (state.controlsDate !== date) {
     state.filters = { type: null, asset: null, market: null };
@@ -276,7 +287,10 @@ async function renderBriefing(date) {
   renderFeed(day);
 
   $("day-notes").hidden = !day.notes;
-  if (day.notes) $("day-notes").textContent = day.notes;
+  if (day.notes) {
+    $("day-notes").textContent = day.notes;
+    linkifyElement($("day-notes"));
+  }
   $("generated-at").textContent = day.generatedAt
     ? `Compiled ${new Date(day.generatedAt).toLocaleString("en-US", { month: "long", day: "numeric", hour: "numeric", minute: "2-digit" })}`
     : "";
@@ -377,6 +391,7 @@ function storyRow(story, date, lead) {
   if (story.summary) {
     const p = document.createElement("p");
     p.textContent = story.summary;
+    linkifyElement(p);
     el.appendChild(p);
   }
   const chips = storyChips(story);
@@ -725,6 +740,7 @@ async function renderWeekly() {
     const p = document.createElement("p");
     p.className = "week-overview";
     p.textContent = wk.overview;
+    linkifyElement(p);
     wrap.appendChild(p);
   }
 
@@ -739,6 +755,7 @@ async function renderWeekly() {
       h3.textContent = t.title;
       const p = document.createElement("p");
       p.textContent = t.body;
+      linkifyElement(p);
       box.append(h3, p);
       grid.appendChild(box);
     }
@@ -768,6 +785,7 @@ async function renderWeekly() {
     const p = document.createElement("p");
     p.className = "week-notes";
     p.textContent = wk.notes;
+    linkifyElement(p);
     wrap.appendChild(p);
   }
 }
@@ -800,6 +818,7 @@ async function renderHistory() {
     if (day?.overview) {
       const p = document.createElement("p");
       p.textContent = day.overview;
+      linkifyElement(p);
       card.appendChild(p);
     }
 
@@ -874,6 +893,84 @@ function playerAvatar(p, big) {
     monogram();
   }
   return el;
+}
+
+/* ---------- entity linking ----------
+   Any roster name appearing in prose (articles, summaries, ledes, dossiers)
+   becomes a tap-through to that player's profile. Matching is case-sensitive
+   ("Compass" the brokerage, not "compass"), longest-name-first, first
+   occurrence per block, and skips text already inside a link. */
+
+function escapeRegex(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function entityIndex(players) {
+  if (state.entityIdx && state.entityIdx.forSize === players.size) return state.entityIdx;
+  const map = new Map();
+  const add = (name, slug) => {
+    if (!name || name.length < 3 || map.has(name)) return;
+    map.set(name, slug);
+    if (name.includes("'")) map.set(name.replace(/'/g, "’"), slug); // curly-quote variant
+  };
+  // full names first so they always beat another entity's alias or surname
+  for (const p of players.values()) add(p.name, p.slug);
+  for (const p of players.values()) for (const a of p.aliases || []) add(a, p.slug);
+  for (const p of players.values()) {
+    // bare-surname shorthand ("Whittall said…"), simple two-word names only
+    const words = p.name.split(/\s+/);
+    if (p.type === "person" && words.length === 2 && words[1].length >= 4) add(words[1], p.slug);
+  }
+  const alts = [...map.keys()].sort((a, b) => b.length - a.length).map(escapeRegex);
+  state.entityIdx = {
+    forSize: players.size,
+    map,
+    regex: alts.length ? new RegExp(`(?<![A-Za-z0-9])(?:${alts.join("|")})(?![A-Za-z0-9])`, "g") : null,
+  };
+  return state.entityIdx;
+}
+
+function linkifyElement(root, excludeSlug) {
+  if (!root) return;
+  getPlayers().then((players) => {
+    if (!players.size || !root.isConnected) return;
+    const { regex, map } = entityIndex(players);
+    if (!regex) return;
+    const seen = new Set();
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+      acceptNode(n) {
+        if (!n.nodeValue || n.nodeValue.length < 3) return NodeFilter.FILTER_REJECT;
+        for (let el = n.parentElement; el && el !== root; el = el.parentElement) {
+          if (el.tagName === "A" || el.classList.contains("entity-link")) return NodeFilter.FILTER_REJECT;
+        }
+        return NodeFilter.FILTER_ACCEPT;
+      },
+    });
+    const nodes = [];
+    while (walker.nextNode()) nodes.push(walker.currentNode);
+    for (const node of nodes) {
+      const text = node.nodeValue;
+      regex.lastIndex = 0;
+      let m, frag = null, last = 0;
+      while ((m = regex.exec(text))) {
+        const slug = map.get(m[0]);
+        if (!slug || slug === excludeSlug || seen.has(slug)) continue;
+        seen.add(slug);
+        if (!frag) frag = document.createDocumentFragment();
+        frag.appendChild(document.createTextNode(text.slice(last, m.index)));
+        const s = document.createElement("span");
+        s.className = "entity-link";
+        s.dataset.slug = slug;
+        s.textContent = m[0];
+        frag.appendChild(s);
+        last = m.index + m[0].length;
+      }
+      if (frag) {
+        frag.appendChild(document.createTextNode(text.slice(last)));
+        node.parentNode.replaceChild(frag, node);
+      }
+    }
+  });
 }
 
 async function renderPlayers() {
@@ -1002,6 +1099,7 @@ function playerCard(p) {
   if (p.tagline) {
     const tag = document.createElement("p");
     tag.textContent = p.tagline;
+    linkifyElement(tag, p.slug);
     el.appendChild(tag);
   }
 
@@ -1045,6 +1143,7 @@ async function renderPlayerProfile(slug) {
   const roleLine = document.createElement("p");
   roleLine.className = "player-roleline";
   roleLine.textContent = p.role || (p.type === "person" ? "Person" : "Company");
+  linkifyElement(roleLine, p.slug);
   id.append(name, roleLine);
   head.append(playerAvatar(p, true), id);
   wrap.appendChild(head);
@@ -1097,6 +1196,7 @@ async function renderPlayerProfile(slug) {
       el.textContent = para;
       dossier.appendChild(el);
     }
+    linkifyElement(dossier, p.slug);
     wrap.appendChild(dossier);
   }
 
@@ -1627,6 +1727,7 @@ async function openReaderRoute(date, id) {
     p.textContent = (story.summary || "") + " Full text wasn't available for this story — use the link below to read it at the source.";
     body.appendChild(p);
   }
+  linkifyElement(body);
 
   $("reader-original").href = story.url || "#";
   $("reader-original-end").href = story.url || "#";

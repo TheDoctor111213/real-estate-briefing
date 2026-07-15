@@ -43,6 +43,7 @@ Also include any other newsletter that is clearly real-estate news. Skip welcome
    - **Who never enters.** Celebrities/athletes/entertainers in personal-home deals, private individuals buying homes, tenants/occupiers acting purely as space users (profile the landlord, not the tenant), reporters, quoted analysts.
    - **Updating an existing profile.** Append today's mention(s) newest-first (cap the array at 40 — `stats.mentions` keeps counting past the cap), update `stats` (`dealVolumeUsd` sums `valueUsd` only where the entity was a transaction principal, not a mere story subject), extend `markets`/`assetClasses`, refresh `lastSeen`. Rewrite `profile`/`tagline` only when today's news meaningfully changes the picture; otherwise leave the prose alone.
    - **One slug per entity, forever.** Check for aliases before creating (e.g. "Blackstone" vs "Blackstone Group"; people by full name). Never re-slug.
+   - **Aliases** (`aliases` field): short alternate names the app auto-links wherever they appear in prose (summaries, articles, dossiers) — e.g. "NAR", "Elliman", "Brookfield", "Oren Alexander". Add them when an entity is commonly referenced by a shorter or different name. Keep them unambiguous and case-exact: never a common English word, never something that could be a different entity. (People with simple two-word names get bare-surname linking automatically — no alias needed for that.)
    - **Profile image** (`image` field): source a stable square image URL when creating a profile. Companies: `https://www.google.com/s2/favicons?domain=<their domain>&sz=128` — verify with curl that it returns HTTP 200 (a 404 means Google has no logo that size; set null). People: the Wikipedia thumbnail from `https://en.wikipedia.org/api/rest_v1/page/summary/<Title>` ONLY after checking the page description actually matches this person (namesakes are common). Never hotlink news-article photos — they rot and block hotlinking. `null` is always fine; the app renders an initials monogram. If `image` is null when an entity resurfaces, try once more (a domain may be identifiable from the new story).
 10. Validate all written files with `python3 -m json.tool`.
 11. **Publish**: `python3 scripts/push_data.py` — upserts every local day and week file plus `data/players.json` to Supabase. The hosted app updates within seconds (no deploy involved).
@@ -109,6 +110,7 @@ The whole roster in one file; `push_data.py` upserts each entry as its own `play
       "org": "people only: their firm's display name (cross-links to the firm's profile in the app) or null",
       "tagline": "one line: who they are and why they matter right now",
       "image": "stable square image URL (company favicon/logo, Wikipedia headshot) or null — see image-sourcing rule in step 9",
+      "aliases": ["short alternate names for auto-linking in prose — see aliases rule in step 9; [] if none"],
       "profile": "2–5 sentence dossier synthesized from ALL coverage to date, not just today; separate paragraphs with \\n\\n",
       "markets": ["DFW"],
       "assetClasses": ["Multifamily"],

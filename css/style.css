@@ -609,6 +609,16 @@ main {
 .player-org-link { cursor: pointer; }
 .player-org-link:hover { border-color: var(--accent); color: var(--accent); }
 
+/* entity links: roster names in prose jump to their profile */
+.entity-link {
+  color: var(--accent);
+  cursor: pointer;
+  border-bottom: 1px dotted var(--ink-3);
+  transition: border-color 0.1s ease;
+}
+
+.entity-link:hover { border-bottom: 1px solid var(--accent); }
+
 /* ---------- Rates ---------- */
 .rate-tiles {
   display: grid;
