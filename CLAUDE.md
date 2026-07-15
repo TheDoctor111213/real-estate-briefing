@@ -133,7 +133,7 @@ The whole roster in one file; `push_data.py` upserts each entry as its own `play
 
 ## Writing style
 
-**Write for a smart reader who doesn't know any of the names.** Every company and person gets an identifying clause on first reference in any prose field — who they are and at what scale, in one breath: "S2 Capital, a Dallas syndicator that scaled to ~$11B of Sun Belt apartments on floating-rate debt", "Asana Partners, a Charlotte urban-retail specialist" — never a bare name. Assume no memory of prior days' coverage.
+**Write for a smart reader who doesn't know any of the names — in as few words as possible.** Every company and person gets a compact identifying clause on first reference in any prose field: "Dallas syndicator S2 Capital", "ex-Buffett protégé Ian Jacobs", "Asana Partners, a Charlotte urban-retail specialist" — never a bare name, never a full sentence of biography. Assume no memory of prior days' coverage. Maximize information per word: keep every number, cut connective tissue. Targets: `overview` ≈ 100 words; each `keyPoint` ≤ 30 words.
 
 - `overview` is an executive summary, not a table of contents. Lead with the day's most consequential story; give the mechanism in numbers (rents −24%, interest costs +50%); say why it matters as a market signal; then the second theme; then breadth. Ban scene-setting filler — "rounds out today's coverage", "claims another victim", "a busy day in…" carry zero information.
 - `keyPoints`: each bullet stands alone as identified actor + number + significance. The test: someone reading only the bullets, knowing nothing, should come away understanding the day.
@@ -141,5 +141,6 @@ The whole roster in one file; `push_data.py` upserts each entry as its own `play
 - `content` is mechanical extraction (email body or fetch_article.py output), not rewriting.
 - Section names stay short and reusable day-to-day.
 
-Bad: "S2 Capital's $400M first fund collapses as the Sun Belt syndication unwind claims another victim."
-Good: "S2 Capital — a Dallas syndicator that built ~$11B of Sun Belt value-add apartments on floating-rate debt — is dissolving its $400M first fund with zero return to investors, after portfolio rents fell 24% while interest costs rose 50%."
+Bad (color, no context): "S2 Capital's $400M first fund collapses as the Sun Belt syndication unwind claims another victim."
+Bad (context, too wordy): "S2 Capital — a Dallas syndicator that built one of the Sun Belt's largest value-add apartment operations (roughly $11B transacted since 2012) on floating-rate debt — is dissolving its $400M first fund with zero return to investors."
+Good: "S2 Capital, the Dallas syndicator that built ~$11B of Sun Belt apartments on floating-rate debt, is dissolving its $400M first fund at a total loss — rents fell 24%, interest costs rose 50%."
