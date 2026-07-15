@@ -61,7 +61,7 @@ Also include any other newsletter that is clearly real-estate news. Skip welcome
     - **Category** (`category` field): a short reusable label — Valuation & Returns, Financing & Debt, Legal & Regulatory, Deal Structures, Market Mechanics, Tax — reuse existing ones before inventing.
 11. Validate all written files with `python3 -m json.tool`.
 12. **Publish**: `python3 scripts/push_data.py` — upserts every local day and week file plus `data/players.json` and `data/terms.json` to Supabase. The hosted app updates within seconds (no deploy involved).
-13. **Rates**: `python3 scripts/fetch_rates.py` — pulls the daily Treasury par yield curve (treasury.gov) and SOFR + compounded averages (NY Fed), and publishes to the Supabase `rates` table. Feeds the app's Rates page and the masthead ticker. Run it every pipeline run; it's cheap and idempotent.
+13. **Rates**: `python3 scripts/fetch_rates.py` — pulls the daily Treasury par yield curve (treasury.gov) and SOFR + compounded averages (NY Fed), and publishes to the Supabase `rates` table. Feeds the app's Rates page and the masthead ticker. Run it every pipeline run; it's cheap and idempotent. **It works even where the run environment's egress policy blocks treasury.gov/newyorkfed.org** (cloud runs often do): it automatically falls back to the Supabase-hosted `rates-live` edge function, which fetches the same sources server-side. A `WARN … falling back` line is normal in the cloud — the run still succeeded. Only an `ERROR` + exit 1 (both paths down) is a failure worth recording in the day's `notes`.
 
 ## Data schema — `data/YYYY-MM-DD.json`
 

@@ -5,13 +5,21 @@ Usage: python3 scripts/fetch_rates.py
 Writes data/rates.json and upserts the row into the `rates` table (keyed by the
 curve date). Run by the daily pipeline; safe to re-run any time.
 
-Sources:
-- treasury.gov daily par yield curve XML feed (current month)
-- NY Fed markets API: SOFR and 30/90/180-day SOFR averages
+Two paths, tried in order:
+1. DIRECT — treasury.gov daily yield-curve XML + NY Fed markets API (with
+   retries and a browser User-Agent).
+2. EDGE FALLBACK — the Supabase `rates-live` edge function, which fetches the
+   same sources from Supabase's servers. This is what makes the script work
+   inside the cloud routine, whose egress policy blocks treasury.gov and
+   newyorkfed.org but allows *.supabase.co.
+
+Exit code 0 whenever a row was published (a WARN line flags a fallback);
+exit 1 only when both paths fail — put that in the day's notes.
 """
 import json
 import pathlib
-import re
+import sys
+import time
 import urllib.request
 from datetime import datetime, timezone
 from xml.etree import ElementTree
@@ -19,6 +27,7 @@ from xml.etree import ElementTree
 SUPABASE_URL = "https://uhwdnmbxiopfysodydty.supabase.co"
 ANON_KEY = "sb_publishable_LEQ5_-jjcRRl2p0wlaiXcw_RX4Wf8-y"
 ROOT = pathlib.Path(__file__).resolve().parent.parent
+UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36"
 
 TENOR_FIELDS = [
     ("1M", "BC_1MONTH"), ("2M", "BC_2MONTH"), ("3M", "BC_3MONTH"),
@@ -29,10 +38,18 @@ TENOR_FIELDS = [
 ]
 
 
-def get(url):
-    req = urllib.request.Request(url, headers={"User-Agent": "briefing-rates/1.0"})
-    with urllib.request.urlopen(req, timeout=30) as r:
-        return r.read()
+def get(url: str, tries: int = 3):
+    last = None
+    for attempt in range(tries):
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": UA, "Accept": "*/*"})
+            with urllib.request.urlopen(req, timeout=30) as r:
+                return r.read()
+        except Exception as e:  # noqa: BLE001 - retry any network failure
+            last = e
+            if attempt < tries - 1:
+                time.sleep(2 * (attempt + 1))
+    raise last
 
 
 def treasury_curve():
@@ -68,33 +85,51 @@ def nyfed(path):
     return rows[0] if rows else {}
 
 
-def main():
+def build_direct() -> dict:
     curve = treasury_curve()
+    if not curve:
+        raise RuntimeError("no treasury curve data returned")
     sofr = nyfed("sofr")
     avgs = nyfed("sofrai")
-
-    if not curve:
-        raise SystemExit("no treasury curve data returned")
-
-    doc = {
+    return {
         "curveDate": curve["date"],
         "treasury": {k: v for k, v in curve.items() if k != "date"},
-        "sofr": {
-            "rate": sofr.get("percentRate"),
-            "date": sofr.get("effectiveDate"),
-        },
+        "sofr": {"rate": sofr.get("percentRate"), "date": sofr.get("effectiveDate")},
         "sofrAverages": {
             "30d": avgs.get("average30day"),
             "90d": avgs.get("average90day"),
             "180d": avgs.get("average180day"),
             "date": avgs.get("effectiveDate"),
         },
+        "source": "direct",
         "generatedAt": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     }
 
+
+def build_from_edge() -> dict:
+    """Same data via the rates-live edge function (runs on Supabase's servers,
+    so it works where this script's own egress to treasury.gov is blocked)."""
+    req = urllib.request.Request(
+        f"{SUPABASE_URL}/functions/v1/rates-live",
+        headers={"apikey": ANON_KEY, "Authorization": f"Bearer {ANON_KEY}"},
+    )
+    with urllib.request.urlopen(req, timeout=60) as r:
+        p = json.load(r)
+    if not p.get("treasury") or not p.get("curveDate"):
+        raise RuntimeError("edge function returned no curve")
+    return {
+        "curveDate": p["curveDate"],
+        "treasury": p["treasury"],
+        "sofr": {"rate": (p.get("sofr") or {}).get("rate"), "date": (p.get("sofr") or {}).get("date")},
+        "sofrAverages": p.get("sofrAverages") or {},
+        "source": "edge-function",
+        "generatedAt": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    }
+
+
+def publish(doc: dict) -> None:
     (ROOT / "data").mkdir(exist_ok=True)
     (ROOT / "data" / "rates.json").write_text(json.dumps(doc, indent=2))
-
     req = urllib.request.Request(
         f"{SUPABASE_URL}/rest/v1/rates",
         data=json.dumps({"date": doc["curveDate"], "data": doc, "generated_at": doc["generatedAt"]}).encode(),
@@ -108,9 +143,24 @@ def main():
     )
     with urllib.request.urlopen(req, timeout=30) as r:
         assert r.status in (200, 201)
-    print(f"rates published for {doc['curveDate']}: "
+    print(f"rates published for {doc['curveDate']} via {doc['source']}: "
           f"5Y {doc['treasury'].get('5Y')} · 10Y {doc['treasury'].get('10Y')} · "
           f"30Y {doc['treasury'].get('30Y')} · SOFR {doc['sofr']['rate']}")
+
+
+def main() -> None:
+    force_edge = "--via-edge" in sys.argv
+    if not force_edge:
+        try:
+            publish(build_direct())
+            return
+        except Exception as e:  # noqa: BLE001 - fall back to the edge path
+            print(f"WARN direct treasury/NY Fed fetch failed ({e}); falling back to rates-live edge function")
+    try:
+        publish(build_from_edge())
+    except Exception as e:  # noqa: BLE001 - both paths dead
+        print(f"ERROR rates unavailable from both direct sources and the edge function: {e}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":
