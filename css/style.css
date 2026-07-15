@@ -165,7 +165,14 @@ body.unlocked .lock { display: none; }
   letter-spacing: -0.2px;
   text-decoration: none;
   white-space: nowrap;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+  transition: opacity 0.15s ease;
 }
+
+/* hold-to-relock: the wordmark drains over the 3s hold as feedback */
+.wordmark.holding { opacity: 0.3; transition: opacity 3s linear; }
 
 .masthead-controls {
   display: flex;

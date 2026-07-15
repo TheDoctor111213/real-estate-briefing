@@ -93,6 +93,29 @@ async function init() {
   $("prev-day").addEventListener("click", () => stepDay(-1));
   $("next-day").addEventListener("click", () => stepDay(1));
 
+  // hold the wordmark for 3s to re-lock the app; a normal click still goes home
+  const wordmark = document.querySelector(".wordmark");
+  if (wordmark) {
+    let holdTimer, relocking = false;
+    const startHold = () => {
+      relocking = false;
+      wordmark.classList.add("holding");
+      holdTimer = setTimeout(() => {
+        relocking = true;
+        wordmark.classList.remove("holding");
+        try { localStorage.removeItem(UNLOCK_KEY); } catch { /* ignore */ }
+        location.reload(); // gate() re-runs → lock screen returns
+      }, 3000);
+    };
+    const cancelHold = () => { clearTimeout(holdTimer); wordmark.classList.remove("holding"); };
+    wordmark.addEventListener("pointerdown", startHold);
+    wordmark.addEventListener("pointerup", cancelHold);
+    wordmark.addEventListener("pointerleave", cancelHold);
+    wordmark.addEventListener("pointercancel", cancelHold);
+    // suppress the navigate-home click that would otherwise fire after a long-press
+    wordmark.addEventListener("click", (e) => { if (relocking) { e.preventDefault(); relocking = false; } });
+  }
+
   // manual refresh — one clean 360° per tap (re-armed each click), toast on result.
   // Class removed on a timer matched to the CSS duration (animationend doesn't
   // fire reliably on inline SVG in every engine), so the stop is deterministic.
@@ -2179,14 +2202,40 @@ async function sha256Hex(s) {
   return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
+let zoomBlockCleanup = null;
+
 function bootApp() {
+  if (zoomBlockCleanup) { zoomBlockCleanup(); zoomBlockCleanup = null; }
   const lock = $("lock");
   if (lock) lock.remove();
   document.body.classList.add("unlocked");
   init();
 }
 
+/* While the lock is up, block desktop page-zoom too (mobile double-tap is
+   handled by CSS touch-action). Covers Ctrl/Cmd+wheel, trackpad pinch (which
+   fires wheel+ctrl on Chrome and gesture events on Safari), and Ctrl/Cmd +/-/0.
+   Torn down on unlock so zoom works normally in the app. */
+function blockLockZoom() {
+  const onWheel = (e) => { if (e.ctrlKey || e.metaKey) e.preventDefault(); };
+  const onGesture = (e) => e.preventDefault();
+  const onKey = (e) => {
+    if ((e.ctrlKey || e.metaKey) && ["+", "-", "=", "_", "0"].includes(e.key)) e.preventDefault();
+  };
+  window.addEventListener("wheel", onWheel, { passive: false });
+  window.addEventListener("gesturestart", onGesture, { passive: false });
+  window.addEventListener("gesturechange", onGesture, { passive: false });
+  window.addEventListener("keydown", onKey);
+  zoomBlockCleanup = () => {
+    window.removeEventListener("wheel", onWheel);
+    window.removeEventListener("gesturestart", onGesture);
+    window.removeEventListener("gesturechange", onGesture);
+    window.removeEventListener("keydown", onKey);
+  };
+}
+
 function runLock() {
+  blockLockZoom();
   const dots = $("lock-dots");
   const prompt = $("lock-prompt");
   const keys = $("lock-keys");
