@@ -105,7 +105,7 @@ async function init() {
         wordmark.classList.remove("holding");
         try { localStorage.removeItem(UNLOCK_KEY); } catch { /* ignore */ }
         location.reload(); // gate() re-runs → lock screen returns
-      }, 3000);
+      }, 1000);
     };
     const cancelHold = () => { clearTimeout(holdTimer); wordmark.classList.remove("holding"); };
     wordmark.addEventListener("pointerdown", startHold);
@@ -328,14 +328,26 @@ async function renderBriefing(date) {
   }
   empty.hidden = true;
 
-  $("lede-block").hidden = !day.overview && !(day.keyPoints || []).length;
+  const hasOverview = !!day.overview;
+  const kps = day.keyPoints || [];
+  $("lede-block").hidden = !hasOverview && !kps.length;
+  $("overview-col").hidden = !hasOverview;
   $("lede").textContent = day.overview || "";
   linkifyElement($("lede"));
+
+  $("kp-col").hidden = !kps.length;
   const kp = $("key-points");
   kp.innerHTML = "";
-  for (const point of day.keyPoints || []) {
+  for (const point of kps) {
+    // a key point is either a plain string or { text, id } linking its source story
+    const text = typeof point === "string" ? point : (point.text || "");
+    const id = typeof point === "string" ? null : point.id;
     const li = document.createElement("li");
-    li.textContent = point;
+    li.textContent = text;
+    if (id && (day.stories || []).some((s) => s.id === id)) {
+      li.classList.add("kp-clickable");
+      li.addEventListener("click", () => { location.hash = `/story/${date}/${id}`; });
+    }
     kp.appendChild(li);
   }
   linkifyElement(kp);
@@ -2206,31 +2218,29 @@ let zoomBlockCleanup = null;
 
 function bootApp() {
   if (zoomBlockCleanup) { zoomBlockCleanup(); zoomBlockCleanup = null; }
+  // restore normal pinch-zoom for reading now that the lock is gone
+  const vp = document.querySelector('meta[name="viewport"]');
+  if (vp) vp.setAttribute("content", "width=device-width, initial-scale=1, viewport-fit=cover");
   const lock = $("lock");
   if (lock) lock.remove();
   document.body.classList.add("unlocked");
   init();
 }
 
-/* While the lock is up, block desktop page-zoom too (mobile double-tap is
-   handled by CSS touch-action). Covers Ctrl/Cmd+wheel, trackpad pinch (which
-   fires wheel+ctrl on Chrome and gesture events on Safari), and Ctrl/Cmd +/-/0.
+/* While the lock is up, block trackpad/mouse pinch-zoom (Ctrl/Cmd+wheel on
+   Chrome, gesture events on Safari). We deliberately do NOT block Ctrl/Cmd +/-/0
+   keyboard zoom, so the user can always reset with Cmd+0 and is never trapped.
    Torn down on unlock so zoom works normally in the app. */
 function blockLockZoom() {
   const onWheel = (e) => { if (e.ctrlKey || e.metaKey) e.preventDefault(); };
   const onGesture = (e) => e.preventDefault();
-  const onKey = (e) => {
-    if ((e.ctrlKey || e.metaKey) && ["+", "-", "=", "_", "0"].includes(e.key)) e.preventDefault();
-  };
   window.addEventListener("wheel", onWheel, { passive: false });
   window.addEventListener("gesturestart", onGesture, { passive: false });
   window.addEventListener("gesturechange", onGesture, { passive: false });
-  window.addEventListener("keydown", onKey);
   zoomBlockCleanup = () => {
     window.removeEventListener("wheel", onWheel);
     window.removeEventListener("gesturestart", onGesture);
     window.removeEventListener("gesturechange", onGesture);
-    window.removeEventListener("keydown", onKey);
   };
 }
 

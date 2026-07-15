@@ -82,7 +82,7 @@ The test: *would the user, opening the app, see something new?* If no, finish si
   "date": "YYYY-MM-DD",
   "generatedAt": "ISO-8601 UTC",
   "overview": "≈100-word signal lede: the through-line and arc movement, NOT a restatement of the keyPoints (see Writing style)",
-  "keyPoints": ["4–8 self-contained takeaways: identified actor + number + why it matters (see Writing style)"],
+  "keyPoints": [{ "text": "4–8 self-contained takeaways: identified actor + number + why it matters (see Writing style)", "id": "the story id this point summarizes — the app makes the row tap-through to that story; omit id (or use a plain string) only for a synthesized point with no single source story" }],
   "watch": ["1–3 dated upcoming catalysts (auctions, trials, policy deadlines, Fed decisions) from today's and recent coverage; [] if none"],
   "stories": [
     {

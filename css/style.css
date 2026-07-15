@@ -171,8 +171,8 @@ body.unlocked .lock { display: none; }
   transition: opacity 0.15s ease;
 }
 
-/* hold-to-relock: the wordmark drains over the 3s hold as feedback */
-.wordmark.holding { opacity: 0.3; transition: opacity 3s linear; }
+/* hold-to-relock: the wordmark drains over the 1s hold as feedback */
+.wordmark.holding { opacity: 0.3; transition: opacity 1s linear; }
 
 .masthead-controls {
   display: flex;
@@ -357,12 +357,23 @@ main {
 }
 
 /* ---------- Lede ---------- */
+/* two labeled parts: Overview = the day's synthesis; Key Points = the key
+   story-facts (each row opens its story) */
+.lede-kicker {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1.4px;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+.lede-kicker { margin-bottom: 7px; }
+#kp-col { margin-top: 16px; }
+
 #lede { font-size: 14.5px; line-height: 1.55; }
 
 #key-points {
   list-style: none;
-  margin-top: 12px;
-  border-top: 1px solid var(--rule);
 }
 
 #key-points li {
@@ -373,6 +384,11 @@ main {
   line-height: 1.45;
   color: var(--ink-2);
 }
+
+/* key points that map to a story open it on tap — no change at rest, subtle
+   hover on desktop; on touch it simply reads as tappable */
+#key-points li.kp-clickable { cursor: pointer; }
+#key-points li.kp-clickable:hover { color: var(--ink); }
 
 #key-points li::before {
   content: "";
@@ -1157,7 +1173,7 @@ main {
 @media (min-width: 960px) {
   :root { --page: 1100px; }
 
-  /* lede and key points share the top band */
+  /* Overview and Key Points sit side by side; Watch spans beneath */
   #lede-block {
     display: grid;
     grid-template-columns: 1.15fr 1fr;
@@ -1165,9 +1181,11 @@ main {
     align-items: start;
   }
 
+  #kp-col { margin-top: 0; }
+  #watch-row { grid-column: 1 / -1; }
+
   #lede { font-size: 16px; }
 
-  #key-points { margin-top: 2px; }
   #key-points li:first-child { padding-top: 0; }
   #key-points li:first-child::before { top: 6px; }
 

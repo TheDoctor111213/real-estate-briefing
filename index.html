@@ -7,11 +7,16 @@
   <meta name="theme-color" content="#101214" media="(prefers-color-scheme: dark)">
   <title>Real Estate Briefing</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🗞️</text></svg>">
-  <!-- set the unlocked flag before first paint so remembered devices never flash the lock -->
-  <script>try{if(localStorage.getItem('briefing_unlocked_v1')==='1')document.documentElement.classList.add('unlocked');}catch(e){}</script>
+  <!-- before first paint: mark remembered devices, and when locked pin the
+       viewport to scale 1 (resets any zoom on refresh + blocks pinch where honored) -->
+  <script>try{
+    var u=localStorage.getItem('briefing_unlocked_v1')==='1';
+    if(u){document.documentElement.classList.add('unlocked');}
+    else{var vp=document.querySelector('meta[name=viewport]');if(vp)vp.setAttribute('content','width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover');}
+  }catch(e){}</script>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
   <!-- bump ?v= on every deploy so cached pages can never pair old code with new data -->
-  <link rel="stylesheet" href="css/style.css?v=17">
+  <link rel="stylesheet" href="css/style.css?v=18">
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" defer></script>
 </head>
 <body>
@@ -74,8 +79,14 @@
     <section id="view-briefing" class="view" hidden>
       <p id="empty-state" hidden></p>
       <div id="lede-block" hidden>
-        <p id="lede"></p>
-        <ul id="key-points"></ul>
+        <div class="lede-col" id="overview-col">
+          <div class="lede-kicker">Overview</div>
+          <p id="lede"></p>
+        </div>
+        <div class="lede-col" id="kp-col">
+          <div class="lede-kicker" id="kp-kicker">Key Points</div>
+          <ul id="key-points"></ul>
+        </div>
         <div id="watch-row" hidden></div>
       </div>
       <div id="controls" class="controls" hidden></div>
@@ -145,6 +156,6 @@
 
   <div id="toast" role="status"></div>
 
-  <script src="js/app.js?v=17"></script>
+  <script src="js/app.js?v=18"></script>
 </body>
 </html>
