@@ -64,6 +64,17 @@ Also include any other newsletter that is clearly real-estate news. Skip welcome
 12. **Publish**: `python3 scripts/push_data.py` — upserts every local day and week file plus `data/players.json` and `data/terms.json` to Supabase. The hosted app updates within seconds (no deploy involved).
 13. **Rates**: **Rates are maintained server-side and need no action from the routine.** A Supabase `pg_cron` job (`rates-heartbeat`, every 30 min) calls the `rates-live` edge function, which fetches the Treasury curve + SOFR from *Supabase's* network (clean egress) and refreshes `rates_cache` — what the app's Rates page and masthead actually read. This is fully independent of the routine's own egress. You MAY run `python3 scripts/fetch_rates.py` as a redundant belt-and-suspenders, but **a failure is expected and non-fatal in sandboxes that block all outbound HTTP (including *.supabase.co) — do NOT record it in the day's `notes`.** The site's rates stay fresh regardless. (Only worth flagging if the app itself shows stale rates, which would mean the edge function or heartbeat is down — a separate infra issue, not a routine failure.)
 
+## Notifications (every run, every window)
+
+**Send a push notification ONLY when the run actually changed published content** — i.e. you rebuilt today's day row and its `generatedAt` advanced because new newsletter editions arrived, new stories were added, or article content/images were filled in. That is the *only* trigger.
+
+**Stay silent otherwise.** Specifically, do NOT notify when:
+- no new newsletters arrived since the current Supabase row and you skip the rebuild (a no-op run — the common case at most of the day's windows);
+- the only thing that happened was a `fetch_rates.py` warning/failure (rates are server-side; see step 13);
+- you merely re-verified existing data, patched `notes`, or hit internal retries.
+
+The test: *would the user, opening the app, see something new?* If no, finish silently. This holds at every scheduled window throughout the day (7:30, 8:00, 8:30, 9, 10 AM, 12, 2, 4 PM ET) — a quiet run is a successful run.
+
 ## Data schema — `data/YYYY-MM-DD.json`
 
 ```json
