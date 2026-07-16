@@ -125,14 +125,49 @@ class ArticleExtractor(HTMLParser):
             self.out.append(data)
 
 
+_TOP_TAG = re.compile(r"<(p|h2|h3|blockquote|ul|ol|figure)\b[^>]*>.*?</\1>|<img\b[^>]*>", re.S)
+_BODY_TAGS = {"p", "ul", "ol", "blockquote"}
+
+
+def _strip_nav_clutter(body: str) -> str:
+    """Trim newsletter/nav chrome that sits OUTSIDE the article body.
+
+    Some sources (credaily.com especially) render an article page with no
+    <article> tag and a long list of other-story <h3> links in the header,
+    a 'trending' rail, and the footer. Those get swept in and dominate the
+    top of the reader. The real article is the run of real paragraphs, so we
+    keep the slice from the first substantial body element (a <p>/<ul> with
+    real text) to the last one, dropping the heading-only clutter that brackets
+    it. On a clean article (starts and ends with paragraphs) this is a no-op."""
+    toks = list(_TOP_TAG.finditer(body))
+    if len(toks) < 2:
+        return body
+    def tag(m):
+        return m.group(1) or "img"
+    def wc(s):
+        return len(re.sub(r"<[^>]+>", " ", s).split())
+    body_idx = [i for i, m in enumerate(toks) if tag(m) in _BODY_TAGS and wc(m.group(0)) >= 4]
+    if not body_idx:
+        return body
+    start, end = body_idx[0], body_idx[-1]
+    # nothing to trim if the body already spans the whole thing
+    if start == 0 and end == len(toks) - 1:
+        return body
+    return "".join(toks[i].group(0) for i in range(start, end + 1))
+
+
 def _looks_blocked(html: str) -> bool:
-    """A Cloudflare/anti-bot interstitial rather than the real article."""
+    """A Cloudflare/anti-bot interstitial rather than the real article. The
+    'Just a moment…' title is Cloudflare's challenge page — an unambiguous
+    signal on its own (no real article is titled that), so we don't also
+    require the challenge-platform script, which some variants omit."""
     low = html[:4000].lower()
-    return ("just a moment" in low and "challenge-platform" in html.lower()) or \
-           ("attention required" in low and "cloudflare" in low) or len(html) < 1200
+    return "just a moment" in low or \
+           ("attention required" in low and "cloudflare" in low) or \
+           ("enable javascript and cookies to continue" in low) or len(html) < 1200
 
 
-def _fetch_direct(url: str) -> str:
+def _fetch_direct(url: str) -> tuple[str, str]:
     headers = {"User-Agent": UA, "Accept": "text/html,application/xhtml+xml,*/*;q=0.8",
                "Accept-Language": "en-US,en;q=0.9"}
     if "therealdeal.com" in urllib.parse.urlparse(url).netloc:
@@ -141,28 +176,31 @@ def _fetch_direct(url: str) -> str:
             headers["Cookie"] = cookie
     req = urllib.request.Request(url, headers=headers)
     with urllib.request.urlopen(req, timeout=30) as resp:
-        return resp.read().decode("utf-8", errors="replace")
+        # resp.geturl() is the URL after any redirects — the real publisher's page
+        return resp.read().decode("utf-8", errors="replace"), resp.geturl()
 
 
-def _fetch_via_proxy(url: str) -> str:
+def _fetch_via_proxy(url: str) -> tuple[str, str]:
     """Fetch through the Supabase fetch-proxy edge function — works where the
     run environment's egress is blocked, or where a site rate-limits our IP but
-    not Supabase's. The proxy forwards the TRD cookie and follows redirects."""
+    not Supabase's. The proxy forwards the TRD cookie and follows redirects, and
+    reports the post-redirect `finalUrl` so we can credit the real publisher."""
     pu = f"{SUPABASE_URL}/functions/v1/fetch-proxy?url=" + urllib.parse.quote(url, safe="")
     req = urllib.request.Request(pu, headers={"apikey": ANON_KEY, "Authorization": f"Bearer {ANON_KEY}"})
     with urllib.request.urlopen(req, timeout=60) as resp:
         doc = json.load(resp)
     if doc.get("html"):
-        return doc["html"]
+        return doc["html"], doc.get("finalUrl") or url
     raise RuntimeError(doc.get("error") or f"proxy status {doc.get('status')}")
 
 
-def _get_html(url: str) -> str:
-    """Direct fetch first; fall back to the edge proxy on failure or a bot wall."""
+def _get_html(url: str) -> tuple[str, str]:
+    """Direct fetch first; fall back to the edge proxy on failure or a bot wall.
+    Returns (html, final_url_after_redirects)."""
     try:
-        html = _fetch_direct(url)
+        html, final = _fetch_direct(url)
         if not _looks_blocked(html):
-            return html
+            return html, final
     except Exception:
         pass  # egress blocked, timeout, 403 — try the proxy
     return _fetch_via_proxy(url)
@@ -170,7 +208,8 @@ def _get_html(url: str) -> str:
 
 def extract(url: str) -> dict:
     is_trd = "therealdeal.com" in urllib.parse.urlparse(url).netloc
-    html = _get_html(url)
+    html, final_url = _get_html(url)
+    blocked = _looks_blocked(html)
 
     has_article_tag = "<article" in html
     p = ArticleExtractor(scope_to_article=has_article_tag)
@@ -179,6 +218,7 @@ def extract(url: str) -> dict:
     # tidy: drop empty paragraphs, collapse whitespace
     body = re.sub(r"<(p|h2|h3|li|blockquote)>\s*</\1>", "", body)
     body = re.sub(r"[ \t]+", " ", body)
+    body = _strip_nav_clutter(body)  # drop newsletter/nav headings around the real body
     words = len(re.sub(r"<[^>]+>", " ", body).split())
     out = {
         "ok": words > 120,
@@ -186,11 +226,16 @@ def extract(url: str) -> dict:
         "image": p.og_image,
         "html": body.strip(),
         "words": words,
+        "finalUrl": final_url,  # after redirects — the real publisher's page
     }
     # a short TRD result usually means the session cookie is missing/expired —
     # surface it so the pipeline can flag it in the day's notes
     if is_trd and not out["ok"]:
         out["paywalled"] = True
+    # distinguish "hit a bot wall" (transient, worth retrying) from a genuinely
+    # empty/short article, so callers report it honestly instead of "0 words"
+    if not out["ok"] and blocked:
+        out["blocked"] = True
     return out
 
 

@@ -411,23 +411,82 @@ function cadenceLabel(story) {
   return story.cadence === "weekly" ? "Weekly" : "Special";
 }
 
+// The reader kicker/meta want a word for every story, footer included.
+function cadenceWord(story) {
+  return story.cadence === "weekly" ? "Weekly" : story.cadence === "special" ? "Special" : "Daily";
+}
+
+/* Publishers, in one fixed order so the footer never shows random permutations.
+   `sources` already names the original publisher — the story `url` domain is only
+   an email tracking-link wrapper (list-manage / beehiiv), never a real source, so
+   it is never displayed. Abbreviations are footer-only and limited to names a
+   reader already knows; the full article window always spells them out. */
+const SOURCE_ORDER = ["The Real Deal", "Inman", "CRE Daily", "CRE Daily New York", "Traded"];
+const SOURCE_ABBR = { "The Real Deal": "TRD", "CRE Daily New York": "CRE Daily NY" };
+
+function sourceLabels(sources, abbrev) {
+  return (sources || []).slice()
+    .sort((a, b) => {
+      const ia = SOURCE_ORDER.indexOf(a), ib = SOURCE_ORDER.indexOf(b);
+      return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib) || a.localeCompare(b);
+    })
+    .map((s) => (abbrev && SOURCE_ABBR[s]) || s);
+}
+
+/* Credit the ORIGINAL PUBLISHER, not just the newsletter that surfaced the story.
+   The publisher is read from the article URL's domain once the pipeline has
+   resolved any email tracking-link wrapper to the real destination. Until that
+   resolves (or for an unknown domain) we fall back to the newsletter name. */
+const PUBLISHER_BY_DOMAIN = [
+  ["therealdeal.com", "The Real Deal"],
+  ["inman.com", "Inman"],
+  ["credaily.com", "CRE Daily"],
+  ["commercialsearch.com", "CommercialSearch"],
+  ["multihousingnews.com", "Multi-Housing News"],
+  ["commercialobserver.com", "Commercial Observer"],
+  ["bisnow.com", "Bisnow"],
+  ["globest.com", "GlobeSt"],
+  ["traded.co", "Traded"],
+  ["tradedmedia.co", "Traded"],
+];
+// email service providers whose domains are wrappers, never a publisher
+const WRAPPER_DOMAINS = ["list-manage.com", "beehiiv.com", "mailchi.mp"];
+
+function domainOf(url) {
+  try { return new URL(url).hostname.replace(/^www\./, "").toLowerCase(); }
+  catch { return ""; }
+}
+
+function publisherFromUrl(url) {
+  const h = domainOf(url);
+  if (!h || WRAPPER_DOMAINS.some((w) => h === w || h.endsWith("." + w) || h.endsWith(w))) return null;
+  for (const [dom, name] of PUBLISHER_BY_DOMAIN) {
+    if (h === dom || h.endsWith("." + dom)) return name;
+  }
+  return null; // real but unmapped domain → fall back to the newsletter
+}
+
+/* Display names to credit for a story: the resolved publisher when known,
+   otherwise the newsletter source(s) in fixed order. `abbrev` swaps in common
+   short forms (TRD) for the footer; the reader passes false for full names. */
+function storyPublishers(story, abbrev) {
+  const pub = publisherFromUrl(story.url);
+  if (pub) return [(abbrev && SOURCE_ABBR[pub]) || pub];
+  return sourceLabels(story.sources, abbrev);
+}
+
 function storyMeta(story, expandable) {
   const row = document.createElement("div");
   row.className = "meta";
   const left = document.createElement("span");
-  const cad = cadenceLabel(story);
-  if (cad) {
-    const c = document.createElement("span");
-    c.className = "cadence";
-    c.textContent = cad + " · ";
-    left.appendChild(c);
-  }
-  const bits = [(story.sources || []).join(" · ")];
+  // Consistent footer: Publisher(s) · in fixed order : Cadence [· read time]
+  const srcs = storyPublishers(story, true).join(" · ");
+  let text = srcs ? `${srcs}: ${cadenceWord(story)}` : cadenceWord(story);
   if (expandable) {
     const mins = readMinutes(story);
-    if (mins) bits.push(`${mins} min`);
+    if (mins) text += ` · ${mins} min`;
   }
-  left.appendChild(document.createTextNode(bits.filter(Boolean).join(" · ")));
+  left.textContent = text;
   row.appendChild(left);
 
   if (expandable) {
@@ -2134,7 +2193,7 @@ async function openReaderRoute(date, id) {
 
   const mins = readMinutes(story);
   $("reader-meta").textContent = [
-    (story.sources || []).join(" · "),
+    storyPublishers(story, false).join(" · "), // real publisher, full name, in the reader
     formatDate(date, { weekday: "long", month: "long", day: "numeric" }),
     mins ? `${mins} min read` : null,
   ].filter(Boolean).join("  ·  ");
