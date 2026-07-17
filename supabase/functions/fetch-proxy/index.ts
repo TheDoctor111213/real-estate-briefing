@@ -30,16 +30,28 @@ function blocked(u: URL): string | null {
   return null;
 }
 
-async function trdCookie(): Promise<string | null> {
-  try {
-    const res = await fetch(`${SB_URL}/rest/v1/secrets?id=eq.trd_session&select=data`, {
-      headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` },
-    });
-    const rows = await res.json();
-    return rows?.[0]?.data?.cookie ?? null;
-  } catch {
-    return null;
+// Stored subscriber session for any outlet: rows keyed `session_<domain>`
+// (saved via scripts/trd_session.py --domain <site>); therealdeal.com also
+// falls back to its legacy `trd_session` row.
+async function sessionCookie(hostname: string): Promise<string | null> {
+  const h = hostname.toLowerCase().replace(/^www\./, "");
+  const parts = h.split(".");
+  const domain = parts.length >= 2 ? parts.slice(-2).join(".") : h;
+  const ids = [`session_${domain}`];
+  if (domain === "therealdeal.com") ids.push("trd_session");
+  for (const id of ids) {
+    try {
+      const res = await fetch(`${SB_URL}/rest/v1/secrets?id=eq.${id}&select=data`, {
+        headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` },
+      });
+      const rows = await res.json();
+      const c = rows?.[0]?.data?.cookie;
+      if (c) return c;
+    } catch {
+      /* try the next id */
+    }
   }
+  return null;
 }
 
 Deno.serve(async (req: Request) => {
@@ -65,10 +77,8 @@ Deno.serve(async (req: Request) => {
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     "Accept-Language": "en-US,en;q=0.9",
   };
-  if (u.hostname.endsWith("therealdeal.com")) {
-    const c = await trdCookie();
-    if (c) reqHeaders["Cookie"] = c;
-  }
+  const c = await sessionCookie(u.hostname);
+  if (c) reqHeaders["Cookie"] = c;
 
   try {
     const res = await fetch(u.href, { headers: reqHeaders, redirect: "follow" });

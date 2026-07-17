@@ -503,24 +503,32 @@ function publisherFromUrl(url) {
   return null; // real but unmapped domain → fall back to the newsletter
 }
 
-/* Display names to credit for a story: the resolved publisher when known,
-   otherwise the newsletter source(s) in fixed order. `abbrev` swaps in common
-   short forms (TRD) for the footer; the reader passes false for full names. */
+/* Display names to credit for a story, primary outlet first: the explicit
+   `publisher` (or the resolved URL domain) leads, then every other outlet that
+   covered it (coverage rows + newsletter sources, deduped). `abbrev` swaps in
+   common short forms (TRD) for the footer; the reader passes false. */
 function storyPublishers(story, abbrev) {
-  // `publisher` is set explicitly by the pipeline (e.g. read from the blurb's
-  // cited source) so a reroute is credited correctly even when the redirect
-  // couldn't be resolved; otherwise derive it from the resolved URL domain.
-  const pub = story.publisher || publisherFromUrl(story.url);
-  if (pub) return [(abbrev && SOURCE_ABBR[pub]) || pub];
-  return sourceLabels(story.sources, abbrev);
+  const list = [];
+  const push = (name) => { if (name && !list.includes(name)) list.push(name); };
+  push(story.publisher || publisherFromUrl(story.url));
+  for (const c of story.coverage || []) push(c.publisher);
+  for (const s of sourceLabels(story.sources, false)) push(s);
+  return list.map((n) => (abbrev && SOURCE_ABBR[n]) || n);
+}
+
+/* Footer form: first outlet [· second] [+N] — compact, corroboration visible. */
+function publisherLine(story) {
+  const names = storyPublishers(story, true);
+  if (names.length <= 2) return names.join(" · ");
+  return names.slice(0, 2).join(" · ") + ` +${names.length - 2}`;
 }
 
 function storyMeta(story, expandable) {
   const row = document.createElement("div");
   row.className = "meta";
   const left = document.createElement("span");
-  // Footer: Publisher(s) in fixed order · Cadence (only when Weekly/Special) · read time
-  const parts = [storyPublishers(story, true).join(" · ")];
+  // Footer: primary outlet [· second] [+N] · Cadence (only when Weekly/Special) · read time
+  const parts = [publisherLine(story)];
   const cad = cadenceLabel(story); // "" for daily — the common case, kept unlabeled
   if (cad) parts.push(cad);
   if (expandable) {
@@ -755,11 +763,15 @@ function renderFeed(day) {
     return;
   }
 
+  // brief one-liners render as the "Also today" strip, never as cards
+  const briefs = filtered.filter((s) => s.brief);
+  const fullStories = filtered.filter((s) => !s.brief);
+
   // Top Stories band only in the unfiltered view
-  let rest = filtered;
+  let rest = fullStories;
   if (!filtering) {
-    const featured = filtered.filter((s) => s.featured);
-    rest = filtered.filter((s) => !s.featured);
+    const featured = fullStories.filter((s) => s.featured);
+    rest = fullStories.filter((s) => !s.featured);
     if (featured.length) {
       feed.appendChild(sectionHead("Top Stories"));
       const group = document.createElement("div");
@@ -785,6 +797,30 @@ function renderFeed(day) {
     group.className = "story-group";
     list.forEach((s) => group.appendChild(storyRow(s, day.date, false)));
     feed.appendChild(group);
+  }
+
+  if (briefs.length) {
+    feed.appendChild(sectionHead("Also today"));
+    const strip = document.createElement("div");
+    strip.className = "brief-strip";
+    for (const s of briefs) {
+      const el = document.createElement(s.url ? "button" : "div");
+      el.className = "brief-row";
+      if (s.url) el.addEventListener("click", () => window.open(s.url, "_blank", "noopener"));
+      const t = document.createElement("span");
+      t.className = "brief-title";
+      t.textContent = s.title;
+      el.appendChild(t);
+      const meta = [s.market, fmtValue(s.valueUsd)].filter(Boolean).join(" · ");
+      if (meta) {
+        const m = document.createElement("span");
+        m.className = "brief-meta";
+        m.textContent = meta;
+        el.appendChild(m);
+      }
+      strip.appendChild(el);
+    }
+    feed.appendChild(strip);
   }
 }
 
@@ -1299,36 +1335,33 @@ async function renderTrends() {
     return;
   }
 
-  /* --- Deal Ledger: every priced transaction, as reported. Facts, no sums. --- */
-  const priced = stories
-    .filter((s) => s.valueUsd)
-    .sort((a, b) => b._date.localeCompare(a._date) || (b.valueUsd - a.valueUsd));
-
-  wrap.appendChild(subHead("Deal Ledger", "Every priced deal from the briefings — a comps record, newest first. $/sf and $/unit appear as sizes get reported."));
-
-  const bar = document.createElement("div");
-  bar.className = "ctl-row ledger-bar";
-  const opt = (key, stories_) => counts(stories_, key);
-  bar.appendChild(makeSelect("All markets", opt("market", priced), state.trendFilters.market, (v) => {
-    state.trendFilters.market = v; renderLedgerList(priced);
-  }));
-  bar.appendChild(makeSelect("All assets", opt("assetClass", priced), state.trendFilters.asset, (v) => {
-    state.trendFilters.asset = v; renderLedgerList(priced);
-  }));
-  bar.appendChild(makeSelect("All types", opt("dealType", priced), state.trendFilters.type, (v) => {
-    state.trendFilters.type = v; renderLedgerList(priced);
-  }));
-  const tally = document.createElement("span");
-  tally.className = "ctl-tally";
-  tally.id = "ledger-tally";
-  bar.appendChild(tally);
-  wrap.appendChild(bar);
-
-  const list = document.createElement("div");
-  list.id = "ledger-list";
-  list.className = "ledger-list";
-  wrap.appendChild(list);
-  renderLedgerList(priced);
+  /* --- Coverage Pulse: what the trade press is paying attention to — story
+         counts as share of coverage, this week vs last. Attention, not dollars. --- */
+  const maxDate = stories.reduce((m, s) => (s._date > m ? s._date : m), "0000");
+  const inWindow = (s, from, to) => s._date > from && s._date <= to;
+  const d7 = addDays(maxDate, -7), d14 = addDays(maxDate, -14);
+  const cur = stories.filter((s) => inWindow(s, d7, maxDate));
+  const prev = stories.filter((s) => inWindow(s, d14, d7));
+  const share = (list) => {
+    const m = new Map();
+    for (const s of list) if (s.dealType) m.set(s.dealType, (m.get(s.dealType) || 0) + 1);
+    return m;
+  };
+  const curShare = share(cur), prevShare = share(prev);
+  const pulse = [...curShare.entries()].sort((a, b) => b[1] - a[1]);
+  if (pulse.length) {
+    wrap.appendChild(subHead("Coverage Pulse", `Share of trade-press attention over the last 7 days (${cur.length} stories)${prev.length ? " — arrows vs the prior week" : ""}. Measures coverage, not market size.`));
+    wrap.appendChild(hbarChart(pulse.map(([name, n]) => {
+      const pct = Math.round((n / cur.length) * 100);
+      let delta = "";
+      if (prev.length) {
+        const prevN = prevShare.get(name) || 0;
+        const prevPct = Math.round((prevN / prev.length) * 100);
+        delta = pct > prevPct ? " ▲" : pct < prevPct ? " ▼" : "";
+      }
+      return { label: typeInfo(name).emoji + " " + name, value: n, sub: `${pct}%${delta}`, color: typeInfo(name).color };
+    })));
+  }
 
   /* --- Records: superlatives are robust to coverage bias; sums aren't. --- */
   const records = stories.filter((s) => s.valueUsd).sort((a, b) => b.valueUsd - a.valueUsd).slice(0, 5);
@@ -1374,33 +1407,37 @@ async function renderTrends() {
     wrap.appendChild(box);
   }
 
-  /* --- Coverage Pulse: what the trade press is paying attention to — story
-         counts as share of coverage, this week vs last. Attention, not dollars. --- */
-  const maxDate = stories.reduce((m, s) => (s._date > m ? s._date : m), "0000");
-  const inWindow = (s, from, to) => s._date > from && s._date <= to;
-  const d7 = addDays(maxDate, -7), d14 = addDays(maxDate, -14);
-  const cur = stories.filter((s) => inWindow(s, d7, maxDate));
-  const prev = stories.filter((s) => inWindow(s, d14, d7));
-  const share = (list) => {
-    const m = new Map();
-    for (const s of list) if (s.dealType) m.set(s.dealType, (m.get(s.dealType) || 0) + 1);
-    return m;
-  };
-  const curShare = share(cur), prevShare = share(prev);
-  const pulse = [...curShare.entries()].sort((a, b) => b[1] - a[1]);
-  if (pulse.length) {
-    wrap.appendChild(subHead("Coverage Pulse", `Share of trade-press attention over the last 7 days (${cur.length} stories)${prev.length ? " — arrows vs the prior week" : ""}. Measures coverage, not market size.`));
-    wrap.appendChild(hbarChart(pulse.map(([name, n]) => {
-      const pct = Math.round((n / cur.length) * 100);
-      let delta = "";
-      if (prev.length) {
-        const prevN = prevShare.get(name) || 0;
-        const prevPct = Math.round((prevN / prev.length) * 100);
-        delta = pct > prevPct ? " ▲" : pct < prevPct ? " ▼" : "";
-      }
-      return { label: typeInfo(name).emoji + " " + name, value: n, sub: `${pct}%${delta}`, color: typeInfo(name).color };
-    })));
-  }
+  /* --- Deal Ledger: every priced transaction, as reported. Facts, no sums.
+         Last on the page by design — the line items are reference material,
+         not the headline. --- */
+  const priced = stories
+    .filter((s) => s.valueUsd)
+    .sort((a, b) => b._date.localeCompare(a._date) || (b.valueUsd - a.valueUsd));
+
+  wrap.appendChild(subHead("Deal Ledger", "Every priced deal from the briefings — a comps record, newest first. $/sf and $/unit appear as sizes get reported."));
+
+  const bar = document.createElement("div");
+  bar.className = "ctl-row ledger-bar";
+  bar.appendChild(makeSelect("All markets", counts(priced, "market"), state.trendFilters.market, (v) => {
+    state.trendFilters.market = v; renderLedgerList(priced);
+  }));
+  bar.appendChild(makeSelect("All assets", counts(priced, "assetClass"), state.trendFilters.asset, (v) => {
+    state.trendFilters.asset = v; renderLedgerList(priced);
+  }));
+  bar.appendChild(makeSelect("All types", counts(priced, "dealType"), state.trendFilters.type, (v) => {
+    state.trendFilters.type = v; renderLedgerList(priced);
+  }));
+  const tally = document.createElement("span");
+  tally.className = "ctl-tally";
+  tally.id = "ledger-tally";
+  bar.appendChild(tally);
+  wrap.appendChild(bar);
+
+  const list = document.createElement("div");
+  list.id = "ledger-list";
+  list.className = "ledger-list";
+  wrap.appendChild(list);
+  renderLedgerList(priced);
 }
 
 /* ---------- players ---------- */
@@ -2661,6 +2698,9 @@ async function openReaderRoute(date, id) {
   $("reader-original").href = story.url || "#";
   $("reader-original-end").href = story.url || "#";
 
+  // other outlets' takes on the same story — depth on demand, never repetition
+  readerCoverageBlock(story, date, null);
+
   // save (bookmark) toggle for this story
   state.reader = { story, date };
   const saveBtn = $("reader-save");
@@ -2677,6 +2717,108 @@ async function openReaderRoute(date, id) {
   reader.hidden = false;
   reader.scrollTop = 0;
   document.body.classList.add("reader-open");
+}
+
+/* ---------- multi-outlet coverage in the reader ----------
+   A merged story holds ONE primary article (story.content/url/publisher) plus a
+   `coverage` array of other outlets' versions. The reader shows the primary and
+   lists the rest as "Also covered by" rows: rows with captured text swap the
+   reader body to that version in place; the rest link out. When a coverage
+   version is active, the primary appears as a row so you can switch back. */
+
+function coverageVersions(story) {
+  return (story.coverage || []).filter((c) => c && (c.url || c.content));
+}
+
+function readerCoverageBlock(story, date, activeIdx) {
+  const box = $("reader-coverage");
+  box.innerHTML = "";
+  const vers = coverageVersions(story);
+  if (!vers.length) { box.hidden = true; return; }
+  box.hidden = false;
+
+  const label = document.createElement("div");
+  label.className = "coverage-label";
+  label.textContent = "Also covered by";
+  box.appendChild(label);
+
+  const entries = [];
+  if (activeIdx !== null) {
+    entries.push({ idx: null, publisher: storyPublishers(story, false)[0] || "Primary",
+                   title: story.title, content: story.content, url: story.url, note: "The primary version" });
+  }
+  vers.forEach((c, i) => { if (i !== activeIdx) entries.push({ idx: i, ...c }); });
+
+  for (const e of entries) {
+    const readable = contentWords({ content: e.content }) >= 80;
+    const row = document.createElement(readable ? "button" : "div");
+    row.className = "coverage-row";
+    const main = document.createElement("div");
+    main.className = "cov-main";
+    const t = document.createElement("p");
+    t.className = "cov-title";
+    const pub = document.createElement("span");
+    pub.className = "cov-pub";
+    pub.textContent = e.publisher || "Source";
+    t.appendChild(pub);
+    if (e.title && e.title !== story.title) {
+      t.appendChild(document.createTextNode(" — " + e.title));
+    }
+    main.appendChild(t);
+    if (e.note) {
+      const n = document.createElement("p");
+      n.className = "cov-note";
+      n.textContent = e.note;
+      main.appendChild(n);
+    }
+    row.appendChild(main);
+    if (readable) {
+      const open = document.createElement("span");
+      open.className = "cov-open";
+      open.textContent = "Read ›";
+      row.appendChild(open);
+      row.addEventListener("click", () => showReaderVersion(story, date, e.idx));
+    } else if (e.url) {
+      const a = document.createElement("a");
+      a.className = "cov-src";
+      a.href = e.url;
+      a.target = "_blank";
+      a.rel = "noopener";
+      a.textContent = "Source ↗";
+      row.appendChild(a);
+    }
+    box.appendChild(row);
+  }
+}
+
+function showReaderVersion(story, date, idx) {
+  const c = idx === null ? null : coverageVersions(story)[idx];
+  const content = c ? c.content : story.content;
+
+  $("reader-title").textContent = (c && c.title) || story.title;
+  const mins = readMinutes({ content });
+  $("reader-meta").textContent = [
+    c ? `${c.publisher || "Coverage"} version` : storyPublishers(story, false).join(" · "),
+    formatDate(date, { weekday: "long", month: "long", day: "numeric" }),
+    mins ? `${mins} min read` : null,
+  ].filter(Boolean).join("  ·  ");
+
+  // hero + explainer belong to the primary version only
+  const hero = $("reader-hero");
+  if (!c && story.image) { $("reader-hero-img").src = story.image; hero.hidden = false; }
+  else hero.hidden = true;
+  $("reader-explainer").hidden = !!c || !story.explainer;
+
+  const body = $("reader-body");
+  body.innerHTML = (content || "").replace(/<script[\s\S]*?<\/script>/gi, "");
+  linkifyElement(body);
+
+  const url = (c && c.url) || story.url || "#";
+  $("reader-original").href = url;
+  $("reader-original-end").href = url;
+
+  readerCoverageBlock(story, date, idx);
+  $("reader").scrollTop = 0;
 }
 
 function hideReader() {

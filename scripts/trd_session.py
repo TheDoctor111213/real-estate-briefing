@@ -57,11 +57,25 @@ def _article_words(url: str, cookie_header: str) -> int:
     return len(text.split())
 
 
+def _domain() -> str:
+    """--domain <site> stores a session for any outlet (default therealdeal.com).
+    e.g.  python3 scripts/trd_session.py --cookie --domain bisnow.com"""
+    args = sys.argv[1:]
+    if "--domain" in args:
+        d = args[args.index("--domain") + 1].lower().removeprefix("www.")
+        return d
+    return "therealdeal.com"
+
+
 def store(cookie_header: str, how: str) -> None:
+    domain = _domain()
+    # legacy row name for TRD (the pipeline reads both); session_<domain> for the rest
+    row_id = "trd_session" if domain == "therealdeal.com" else f"session_{domain}"
     row = {
-        "id": "trd_session",
+        "id": row_id,
         "data": {
             "cookie": cookie_header,
+            "domain": domain,
             "savedAt": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "via": how,
             "note": "Browser session cookies only; no password is ever stored.",
@@ -80,7 +94,7 @@ def store(cookie_header: str, how: str) -> None:
     )
     with urllib.request.urlopen(req, timeout=30) as resp:
         assert resp.status in (200, 201)
-    print("Session cookie stored. The pipeline will now use it for therealdeal.com articles.")
+    print(f"Session cookie stored. The pipeline will now use it for {domain} articles.")
 
 
 def run_cookie_mode() -> None:

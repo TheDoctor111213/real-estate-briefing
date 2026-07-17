@@ -1,16 +1,16 @@
 /* Service worker: offline-capable app shell + last-known data cache.
    Bump VERSION (and the ?v= on assets in index.html) on every deploy so old
    caches are dropped and clients can never pair stale code with new data. */
-const VERSION = "v26";
+const VERSION = "v27";
 const SHELL = "shell-" + VERSION;
 const DATA = "data-" + VERSION;
 
 const SHELL_ASSETS = [
   "./",
   "./index.html",
-  "./css/style.css?v=26",
-  "./js/app.js?v=26",
-  "./manifest.webmanifest?v=26",
+  "./css/style.css?v=27",
+  "./js/app.js?v=27",
+  "./manifest.webmanifest?v=27",
   "./icon.svg",
   "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css",
   "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js",

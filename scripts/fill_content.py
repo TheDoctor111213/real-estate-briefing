@@ -151,7 +151,8 @@ def fill_day(day: dict, throttle: float = 1.5, retry_wait: float = 25) -> dict:
 
     Returns a report: {filled, failed, paywalled, skipped, attempted}."""
     stories = day.get("stories") or []
-    to_fetch = [s for s in stories if _words(s.get("content")) < MIN_WORDS and s.get("url")]
+    # brief one-liners deliberately carry no article content — never fetch them
+    to_fetch = [s for s in stories if _words(s.get("content")) < MIN_WORDS and s.get("url") and not s.get("brief")]
     skipped = len(stories) - len(to_fetch)
     filled, paywalled = [], []
     unresolved = {}  # id -> (kind, detail); kind in {"blocked", "failed"}

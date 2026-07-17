@@ -21,18 +21,29 @@ SUPABASE_URL = "https://uhwdnmbxiopfysodydty.supabase.co"
 ANON_KEY = "sb_publishable_LEQ5_-jjcRRl2p0wlaiXcw_RX4Wf8-y"
 
 
-def _trd_cookie() -> str | None:
-    """Subscriber session for therealdeal.com, stored by scripts/trd_session.py."""
-    try:
-        req = urllib.request.Request(
-            f"{SUPABASE_URL}/rest/v1/secrets?id=eq.trd_session&select=data",
-            headers={"apikey": ANON_KEY, "Authorization": f"Bearer {ANON_KEY}"},
-        )
-        with urllib.request.urlopen(req, timeout=15) as r:
-            rows = json.load(r)
-        return rows[0]["data"]["cookie"] if rows else None
-    except Exception:
-        return None
+def _session_cookie(url: str) -> str | None:
+    """Stored subscriber session for the URL's site, if the owner saved one via
+    scripts/trd_session.py. Rows are keyed `session_<domain>`; therealdeal.com
+    also falls back to the legacy `trd_session` row."""
+    host = urllib.parse.urlparse(url).netloc.lower().removeprefix("www.")
+    parts = host.split(".")
+    domain = ".".join(parts[-2:]) if len(parts) >= 2 else host
+    ids = [f"session_{domain}"]
+    if domain == "therealdeal.com":
+        ids.append("trd_session")
+    for row_id in ids:
+        try:
+            req = urllib.request.Request(
+                f"{SUPABASE_URL}/rest/v1/secrets?id=eq.{row_id}&select=data",
+                headers={"apikey": ANON_KEY, "Authorization": f"Bearer {ANON_KEY}"},
+            )
+            with urllib.request.urlopen(req, timeout=15) as r:
+                rows = json.load(r)
+            if rows:
+                return rows[0]["data"]["cookie"]
+        except Exception:
+            continue
+    return None
 
 KEEP = {"p", "h2", "h3", "blockquote", "ul", "ol", "li", "img", "figure", "figcaption"}
 DROP_SUBTREES = {"script", "style", "noscript", "iframe", "form", "aside", "nav", "footer", "header", "svg", "button"}
@@ -170,10 +181,9 @@ def _looks_blocked(html: str) -> bool:
 def _fetch_direct(url: str) -> tuple[str, str]:
     headers = {"User-Agent": UA, "Accept": "text/html,application/xhtml+xml,*/*;q=0.8",
                "Accept-Language": "en-US,en;q=0.9"}
-    if "therealdeal.com" in urllib.parse.urlparse(url).netloc:
-        cookie = _trd_cookie()
-        if cookie:
-            headers["Cookie"] = cookie
+    cookie = _session_cookie(url)
+    if cookie:
+        headers["Cookie"] = cookie
     req = urllib.request.Request(url, headers=headers)
     with urllib.request.urlopen(req, timeout=30) as resp:
         # resp.geturl() is the URL after any redirects — the real publisher's page

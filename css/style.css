@@ -1309,3 +1309,67 @@ main {
   .ledger-row:hover { border-color: var(--ink-3); }
   .ledger-row:hover .lr-title { color: var(--accent); }
 }
+
+/* "Also today": sub-budget one-liners at the feed's bottom — complete, not loud */
+.brief-strip { display: flex; flex-direction: column; }
+.brief-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  text-align: left;
+  padding: 8px 2px;
+  border-bottom: 1px solid var(--rule);
+  -webkit-tap-highlight-color: transparent;
+}
+.brief-row:last-child { border-bottom: none; }
+.brief-title { font-size: 12.5px; line-height: 1.4; color: var(--ink-2); min-width: 0; }
+.brief-meta {
+  flex: 0 0 auto;
+  font-size: 9.5px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+@media (hover: hover) {
+  button.brief-row:hover .brief-title { color: var(--accent); }
+}
+
+/* Reader: "Also covered by" — other outlets' takes as depth-on-demand rows */
+.reader-coverage { margin-top: 26px; padding-top: 16px; border-top: 1px solid var(--rule); }
+.coverage-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1.4px;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  margin-bottom: 10px;
+}
+.coverage-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  text-align: left;
+  background: var(--box);
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  padding: 10px 13px;
+  -webkit-tap-highlight-color: transparent;
+  transition: border-color 0.12s ease;
+}
+.coverage-row + .coverage-row { margin-top: 6px; }
+.cov-main { min-width: 0; }
+.cov-title { font-size: 12.5px; line-height: 1.4; color: var(--ink-2); margin: 0; }
+.cov-pub { font-weight: 700; color: var(--ink); }
+.cov-note { font-size: 10.5px; color: var(--ink-3); margin: 3px 0 0; }
+.cov-open { font-size: 11px; font-weight: 700; color: var(--accent); white-space: nowrap; }
+.cov-src { font-size: 11px; font-weight: 700; color: var(--ink-3); text-decoration: none; white-space: nowrap; }
+.cov-src:hover { color: var(--accent); }
+@media (hover: hover) {
+  button.coverage-row:hover { border-color: var(--ink-3); }
+  button.coverage-row:hover .cov-pub { color: var(--accent); }
+}
