@@ -78,6 +78,7 @@ const state = {
   histRange: "3M",     // "1M" | "3M" | "6M" | "1Y"
   fwdHorizon: "1Y",    // forward-view horizon: "30D" | "90D" | "6M" | "1Y" | "3Y" | "5Y"
   allDays: null,       // every day's data, loaded once for Search + Trends
+  trendFilters: { market: null, asset: null, type: null }, // Deal Ledger filters
   searchQuery: "",
   reader: null,        // { story, date } currently open in the reader
 };
@@ -1180,19 +1181,6 @@ function renderSearchResults(root, days, players, terms) {
 
 /* ---------- trends ---------- */
 
-function tallyBy(stories, key) {
-  const m = new Map();
-  for (const s of stories) {
-    const v = s[key];
-    if (!v) continue;
-    const cur = m.get(v) || { name: v, count: 0, volume: 0 };
-    cur.count++;
-    cur.volume += s.valueUsd || 0;
-    m.set(v, cur);
-  }
-  return [...m.values()].sort((a, b) => b.count - a.count || b.volume - a.volume);
-}
-
 function hbarChart(items) {
   const max = Math.max(1, ...items.map((i) => i.value));
   const box = document.createElement("div");
@@ -1219,69 +1207,199 @@ function hbarChart(items) {
   return box;
 }
 
+/* The Trends page shows only what curated trade-press coverage credibly
+   supports. Each individual fact (a deal, its price, its parties) is real and
+   editor-verified — but SUMS of them measure what got reported, not the market
+   (one mega-deal's news day would dwarf a quiet week). So: facts are shown as
+   facts (a comps ledger, records, a distress list) and attention is shown as
+   attention (story counts, labeled as coverage) — never attention as dollars. */
+
+function subHead(label, sub) {
+  const wrap = document.createElement("div");
+  wrap.appendChild(sectionHead(label));
+  if (sub) {
+    const p = document.createElement("p");
+    p.className = "trends-note";
+    p.textContent = sub;
+    wrap.appendChild(p);
+  }
+  return wrap;
+}
+
+function ledgerRow(s) {
+  const el = document.createElement("button");
+  el.className = "ledger-row";
+  el.addEventListener("click", () => { location.hash = `/story/${s._date}/${s.id}`; });
+  const main = document.createElement("div");
+  main.className = "lr-main";
+  const t = document.createElement("div");
+  t.className = "lr-title";
+  t.textContent = s.title;
+  const m = document.createElement("div");
+  m.className = "lr-meta";
+  m.textContent = [
+    formatDate(s._date, { month: "short", day: "numeric" }),
+    s.market,
+    s.assetClass,
+    s.dealType ? typeInfo(s.dealType).emoji + " " + s.dealType : null,
+    s.cadence === "weekly" ? "Weekly recap" : null,
+  ].filter(Boolean).join(" · ");
+  main.append(t, m);
+  const price = document.createElement("div");
+  price.className = "lr-price";
+  const v = document.createElement("div");
+  v.className = "lr-val";
+  v.textContent = fmtValue(s.valueUsd);
+  price.appendChild(v);
+  const per = derivedMetric(s);
+  if (per) {
+    const p = document.createElement("div");
+    p.className = "lr-per";
+    p.textContent = per;
+    price.appendChild(p);
+  }
+  el.append(main, price);
+  return el;
+}
+
+function renderLedgerList(priced) {
+  const box = $("ledger-list");
+  if (!box) return;
+  box.innerHTML = "";
+  const f = state.trendFilters;
+  const list = priced.filter((s) =>
+    (!f.market || s.market === f.market) &&
+    (!f.asset || s.assetClass === f.asset) &&
+    (!f.type || s.dealType === f.type)
+  );
+  const tally = $("ledger-tally");
+  if (tally) tally.textContent = `${list.length} of ${priced.length}`;
+  if (!list.length) {
+    const p = document.createElement("p");
+    p.className = "trends-note";
+    p.textContent = "No priced deals match these filters.";
+    box.appendChild(p);
+    return;
+  }
+  for (const s of list.slice(0, 120)) box.appendChild(ledgerRow(s));
+}
+
 async function renderTrends() {
   const wrap = $("trends-content");
   wrap.innerHTML = "";
   const days = await getAllDays();
-  const stories = days.flatMap((d) => d.stories || []);
+  // stories tagged with their day; newest first
+  const stories = days.flatMap((d) => (d.stories || []).map((s) => ({ ...s, _date: d.date })));
 
   if (!stories.length) {
     const p = document.createElement("p");
     p.style.cssText = "font-style:italic;color:var(--ink-2);padding:40px 0;text-align:center";
-    p.textContent = "Trends build as briefings accumulate.";
+    p.textContent = "The ledger builds as briefings accumulate.";
     wrap.appendChild(p);
     return;
   }
 
-  const totalVol = stories.reduce((s, x) => s + (x.valueUsd || 0), 0);
-  const byMarket = tallyBy(stories, "market");
-  const byType = tallyBy(stories, "dealType");
-  const byAsset = tallyBy(stories, "assetClass");
+  /* --- Deal Ledger: every priced transaction, as reported. Facts, no sums. --- */
+  const priced = stories
+    .filter((s) => s.valueUsd)
+    .sort((a, b) => b._date.localeCompare(a._date) || (b.valueUsd - a.valueUsd));
 
-  const tiles = document.createElement("div");
-  tiles.className = "rate-tiles quads";
-  for (const [l, v] of [["Stories", String(stories.length)], ["Tracked volume", fmtValue(totalVol) || "—"], ["Days", String(days.length)], ["Markets", String(byMarket.length)]]) {
-    const t = document.createElement("div");
-    t.className = "rate-tile";
-    const a = document.createElement("div"); a.className = "rt-label"; a.textContent = l;
-    const b = document.createElement("div"); b.className = "rt-value"; b.textContent = v;
-    t.append(a, b);
-    tiles.appendChild(t);
+  wrap.appendChild(subHead("Deal Ledger", "Every priced deal from the briefings — a comps record, newest first. $/sf and $/unit appear as sizes get reported."));
+
+  const bar = document.createElement("div");
+  bar.className = "ctl-row ledger-bar";
+  const opt = (key, stories_) => counts(stories_, key);
+  bar.appendChild(makeSelect("All markets", opt("market", priced), state.trendFilters.market, (v) => {
+    state.trendFilters.market = v; renderLedgerList(priced);
+  }));
+  bar.appendChild(makeSelect("All assets", opt("assetClass", priced), state.trendFilters.asset, (v) => {
+    state.trendFilters.asset = v; renderLedgerList(priced);
+  }));
+  bar.appendChild(makeSelect("All types", opt("dealType", priced), state.trendFilters.type, (v) => {
+    state.trendFilters.type = v; renderLedgerList(priced);
+  }));
+  const tally = document.createElement("span");
+  tally.className = "ctl-tally";
+  tally.id = "ledger-tally";
+  bar.appendChild(tally);
+  wrap.appendChild(bar);
+
+  const list = document.createElement("div");
+  list.id = "ledger-list";
+  list.className = "ledger-list";
+  wrap.appendChild(list);
+  renderLedgerList(priced);
+
+  /* --- Records: superlatives are robust to coverage bias; sums aren't. --- */
+  const records = stories.filter((s) => s.valueUsd).sort((a, b) => b.valueUsd - a.valueUsd).slice(0, 5);
+  if (records.length) {
+    wrap.appendChild(subHead("Records", "Largest reported deals to date."));
+    const box = document.createElement("div");
+    box.className = "week-stories";
+    for (const s of records) {
+      const btn = document.createElement("button");
+      btn.className = "week-story";
+      btn.addEventListener("click", () => { location.hash = `/story/${s._date}/${s.id}`; });
+      const h4 = document.createElement("h4");
+      h4.textContent = s.title;
+      const meta = document.createElement("div");
+      meta.className = "meta";
+      meta.textContent = [fmtValue(s.valueUsd), s.market, s.assetClass, formatDate(s._date, { month: "short", day: "numeric" })].filter(Boolean).join(" · ");
+      btn.append(h4, meta);
+      box.appendChild(btn);
+    }
+    wrap.appendChild(box);
   }
-  wrap.appendChild(tiles);
-  const note = document.createElement("p");
-  note.className = "trends-note";
-  note.textContent = "Across every briefing on record. Tracked volume sums each story's single deal size.";
-  wrap.appendChild(note);
 
-  const byDay = days.slice().sort((a, b) => a.date.localeCompare(b.date)).map((d) => {
-    const list = d.stories || [];
-    return { date: d.date, count: list.length, volume: list.reduce((s, x) => s + (x.valueUsd || 0), 0) };
-  });
-  if (byDay.length > 1) {
-    wrap.appendChild(sectionHead("Deal volume by day"));
-    wrap.appendChild(hbarChart(byDay.map((d) => ({
-      label: formatDate(d.date, { month: "short", day: "numeric" }),
-      value: d.volume,
-      sub: (fmtValue(d.volume) || "—") + " · " + d.count,
-    }))));
+  /* --- Distress Watch: a running list of distress events — an early-warning
+         ledger, not a score. --- */
+  const distress = stories.filter((s) => s.dealType === "Distress")
+    .sort((a, b) => b._date.localeCompare(a._date));
+  if (distress.length) {
+    wrap.appendChild(subHead("Distress Watch", "Every distress event on record — defaults, foreclosures, workouts — newest first."));
+    const box = document.createElement("div");
+    box.className = "week-stories";
+    for (const s of distress) {
+      const btn = document.createElement("button");
+      btn.className = "week-story";
+      btn.addEventListener("click", () => { location.hash = `/story/${s._date}/${s.id}`; });
+      const h4 = document.createElement("h4");
+      h4.textContent = s.title;
+      const meta = document.createElement("div");
+      meta.className = "meta";
+      meta.textContent = [formatDate(s._date, { month: "short", day: "numeric" }), s.market, s.assetClass, fmtValue(s.valueUsd)].filter(Boolean).join(" · ");
+      btn.append(h4, meta);
+      box.appendChild(btn);
+    }
+    wrap.appendChild(box);
   }
 
-  wrap.appendChild(sectionHead("Most active markets"));
-  wrap.appendChild(hbarChart(byMarket.slice(0, 8).map((m) => ({
-    label: m.name, value: m.count, sub: m.count + (m.volume ? " · " + fmtValue(m.volume) : ""),
-  }))));
-
-  wrap.appendChild(sectionHead("Deal types"));
-  wrap.appendChild(hbarChart(byType.map((t) => ({
-    label: typeInfo(t.name).emoji + " " + t.name, value: t.count, sub: String(t.count), color: typeInfo(t.name).color,
-  }))));
-
-  if (byAsset.length) {
-    wrap.appendChild(sectionHead("Asset classes"));
-    wrap.appendChild(hbarChart(byAsset.slice(0, 8).map((a) => ({
-      label: a.name, value: a.count, sub: a.count + (a.volume ? " · " + fmtValue(a.volume) : ""),
-    }))));
+  /* --- Coverage Pulse: what the trade press is paying attention to — story
+         counts as share of coverage, this week vs last. Attention, not dollars. --- */
+  const maxDate = stories.reduce((m, s) => (s._date > m ? s._date : m), "0000");
+  const inWindow = (s, from, to) => s._date > from && s._date <= to;
+  const d7 = addDays(maxDate, -7), d14 = addDays(maxDate, -14);
+  const cur = stories.filter((s) => inWindow(s, d7, maxDate));
+  const prev = stories.filter((s) => inWindow(s, d14, d7));
+  const share = (list) => {
+    const m = new Map();
+    for (const s of list) if (s.dealType) m.set(s.dealType, (m.get(s.dealType) || 0) + 1);
+    return m;
+  };
+  const curShare = share(cur), prevShare = share(prev);
+  const pulse = [...curShare.entries()].sort((a, b) => b[1] - a[1]);
+  if (pulse.length) {
+    wrap.appendChild(subHead("Coverage Pulse", `Share of trade-press attention over the last 7 days (${cur.length} stories)${prev.length ? " — arrows vs the prior week" : ""}. Measures coverage, not market size.`));
+    wrap.appendChild(hbarChart(pulse.map(([name, n]) => {
+      const pct = Math.round((n / cur.length) * 100);
+      let delta = "";
+      if (prev.length) {
+        const prevN = prevShare.get(name) || 0;
+        const prevPct = Math.round((prevN / prev.length) * 100);
+        delta = pct > prevPct ? " ▲" : pct < prevPct ? " ▼" : "";
+      }
+      return { label: typeInfo(name).emoji + " " + name, value: n, sub: `${pct}%${delta}`, color: typeInfo(name).color };
+    })));
   }
 }
 

@@ -1265,5 +1265,47 @@ main {
 .hbar-track { height: 8px; background: var(--rule); border-radius: 99px; overflow: hidden; }
 .hbar-fill { height: 100%; background: var(--accent); border-radius: 99px; min-width: 3px; }
 .hbar-val { font-size: 10.5px; color: var(--ink-3); font-variant-numeric: tabular-nums; white-space: nowrap; }
-#trends-content .rate-tiles { margin-bottom: 6px; }
 #trends-content .section-head { margin-top: 22px; }
+#trends-content > div:first-child .section-head { margin-top: 4px; }
+
+/* Deal Ledger: one priced deal per row — a fact, not an aggregate */
+.ledger-bar { margin: 2px 0 10px; }
+.ledger-list { display: flex; flex-direction: column; gap: 7px; }
+.ledger-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  text-align: left;
+  background: var(--box);
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  padding: 10px 13px;
+  -webkit-tap-highlight-color: transparent;
+  transition: border-color 0.12s ease;
+}
+.lr-main { min-width: 0; }
+.lr-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1.35;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.lr-meta {
+  margin-top: 3px;
+  font-size: 9.5px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.lr-price { flex: 0 0 auto; text-align: right; }
+.lr-val { font-size: 14px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.lr-per { font-size: 10.5px; color: var(--ink-3); font-variant-numeric: tabular-nums; margin-top: 2px; }
+@media (hover: hover) {
+  .ledger-row:hover { border-color: var(--ink-3); }
+  .ledger-row:hover .lr-title { color: var(--accent); }
+}
