@@ -178,6 +178,11 @@ async function init() {
     if (Math.abs(dx) > 70 && Math.abs(dy) < 60) readerStep(dx < 0 ? 1 : -1);
   }, { passive: true });
 
+  // share the open story as a typographic image card
+  $("reader-share").addEventListener("click", () => {
+    if (state.reader) shareStoryCard(state.reader.story, state.reader.date);
+  });
+
   // text size (persists per reader profile)
   $("reader-size").addEventListener("click", () => {
     const order = ["m", "l", "s"];
@@ -393,6 +398,9 @@ function route() {
   } else if (h === "#/rates") {
     showView("rates");
     renderRates();
+  } else if (h === "#/status") {
+    showView("status");
+    renderStatus();
   } else if (h === "#/trends") {
     showView("trends");
     renderTrends();
@@ -507,9 +515,10 @@ async function renderBriefing(date) {
     $("day-notes").textContent = day.notes;
     linkifyElement($("day-notes"));
   }
-  $("generated-at").textContent = day.generatedAt
+  $("generated-at-text").textContent = day.generatedAt
     ? `Compiled ${new Date(day.generatedAt).toLocaleString("en-US", { month: "long", day: "numeric", hour: "numeric", minute: "2-digit" })}`
     : "";
+  paintHealthDot(day);
 }
 
 function contentWords(story) {
@@ -1233,6 +1242,7 @@ async function renderHistory() {
     wrap.textContent = "No briefings yet.";
     return;
   }
+  await renderHistoryHeat(wrap);
   for (const date of state.dates.slice().reverse()) {
     const day = await getDay(date);
     const card = document.createElement("button");
@@ -2059,6 +2069,7 @@ async function renderDictionary() {
   }
 
   const all = [...terms.values()];
+  renderTermOfDay(wrap, all);
   const categories = [...new Set(all.map((t) => t.category).filter(Boolean))].sort();
 
   const bar = document.createElement("div");
@@ -3882,6 +3893,449 @@ async function showProfilePicker(coldBoot) {
   };
 
   renderGrid("pick");
+}
+
+/* ---------- term of the day ----------
+   One card, one habit: a date-seeded pick weighted toward recently-mentioned
+   terms, definition hidden behind a reveal (active recall). "Got it" marks the
+   term learned on this profile and retires it from the rotation. */
+
+function renderTermOfDay(wrap, all) {
+  const learned = new Set(pref("learnedTerms", []));
+  let pool = all.filter((t) => !learned.has(t.slug));
+  if (!pool.length) pool = all;
+  const recent = pool.filter((t) => daysSince(t.stats?.lastSeen) <= 14);
+  const pickFrom = recent.length >= 3 ? recent : pool;
+  const today = new Date().toISOString().slice(0, 10);
+  let h = 0;
+  for (const ch of today) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  const t = pickFrom[h % pickFrom.length];
+  if (!t) return;
+
+  const card = document.createElement("div");
+  card.className = "totd";
+
+  const kicker = document.createElement("div");
+  kicker.className = "totd-kicker";
+  kicker.textContent = "Term of the day";
+  card.appendChild(kicker);
+
+  const head = document.createElement("div");
+  head.className = "totd-head";
+  const name = document.createElement("span");
+  name.className = "totd-term";
+  name.textContent = t.term;
+  head.appendChild(name);
+  if (t.category) {
+    const c = document.createElement("span");
+    c.className = "totd-cat";
+    c.textContent = t.category;
+    head.appendChild(c);
+  }
+  card.appendChild(head);
+
+  const def = document.createElement("p");
+  def.className = "totd-def";
+  def.textContent = t.shortDef || (t.definition || "").split("\n")[0];
+  def.hidden = true;
+  card.appendChild(def);
+
+  const actions = document.createElement("div");
+  actions.className = "totd-actions";
+  card.appendChild(actions);
+
+  const reveal = document.createElement("button");
+  reveal.className = "totd-reveal";
+  reveal.textContent = "Reveal definition";
+  actions.appendChild(reveal);
+
+  reveal.addEventListener("click", () => {
+    def.hidden = false;
+    actions.innerHTML = "";
+
+    const got = document.createElement("button");
+    got.className = "totd-chip";
+    got.textContent = "Got it ✓";
+    got.addEventListener("click", () => {
+      const list = pref("learnedTerms", []);
+      if (!list.includes(t.slug)) setPref("learnedTerms", [...list, t.slug]);
+      got.textContent = "Learned — retired from rotation";
+      got.disabled = true;
+    });
+    actions.appendChild(got);
+
+    const full = document.createElement("button");
+    full.className = "totd-chip quiet";
+    full.textContent = "Full entry →";
+    full.addEventListener("click", () => { location.hash = `/term/${t.slug}`; });
+    actions.appendChild(full);
+
+    const mn = (t.mentions || [])[0];
+    if (mn) {
+      const seen = document.createElement("button");
+      seen.className = "totd-seen";
+      seen.textContent = `Seen ${formatDate(mn.date, { month: "short", day: "numeric" })}: ${mn.title}`;
+      seen.addEventListener("click", () => { location.hash = `/story/${mn.date}/${mn.id}`; });
+      card.appendChild(seen);
+    }
+  });
+
+  wrap.appendChild(card);
+}
+
+/* ---------- history heatmap ---------- */
+
+async function renderHistoryHeat(wrap) {
+  const days = await getAllDays();
+  if (days.length < 2) return;
+  const byDate = new Map(days.map((d) => [d.date, d]));
+  const metric = state.histMetric || "stories";
+  const valOf = (d) => !d ? 0
+    : metric === "stories" ? (d.stories || []).length
+    : (d.stories || []).reduce((s, x) => s + (x.valueUsd || 0), 0);
+
+  const box = document.createElement("div");
+  box.className = "heat";
+
+  const bar = document.createElement("div");
+  bar.className = "heat-bar";
+  const label = document.createElement("span");
+  label.className = "heat-label";
+  label.textContent = "Every briefing";
+  bar.appendChild(label);
+  const toggle = document.createElement("div");
+  toggle.className = "map-toggle";
+  for (const [val, text] of [["stories", "Stories"], ["value", "Deal $"]]) {
+    const b = document.createElement("button");
+    b.textContent = text;
+    b.classList.toggle("on", metric === val);
+    b.addEventListener("click", () => { state.histMetric = val; renderHistory(); });
+    toggle.appendChild(b);
+  }
+  bar.appendChild(toggle);
+  box.appendChild(bar);
+
+  // months from the first briefing to today, each a little calendar
+  const first = state.dates[0];
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const max = Math.max(...days.map(valOf), 1);
+  let [y, m] = first.split("-").map(Number);
+  const [ty, tm] = todayIso.split("-").map(Number);
+
+  const months = document.createElement("div");
+  months.className = "heat-months";
+  while (y < ty || (y === ty && m <= tm)) {
+    const month = document.createElement("div");
+    month.className = "heat-month";
+    const name = document.createElement("div");
+    name.className = "heat-month-name";
+    name.textContent = new Date(y, m - 1, 1).toLocaleDateString("en-US", { month: "long", year: "numeric" });
+    month.appendChild(name);
+    const grid = document.createElement("div");
+    grid.className = "heat-grid";
+    const firstDow = new Date(y, m - 1, 1).getDay();
+    for (let i = 0; i < firstDow; i++) grid.appendChild(document.createElement("span"));
+    const dim = new Date(y, m, 0).getDate();
+    for (let d = 1; d <= dim; d++) {
+      const iso = `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+      const day = byDate.get(iso);
+      const v = valOf(day);
+      const cell = document.createElement(day ? "button" : "span");
+      cell.className = "heat-cell";
+      if (day) {
+        const level = v <= 0 ? 1 : Math.min(4, 1 + Math.floor((v / max) * 3.999));
+        cell.classList.add(`l${level}`);
+        cell.title = `${formatDate(iso, { month: "short", day: "numeric" })} · ${
+          metric === "stories" ? `${v} stories` : (fmtValue(v) || "$0")}`;
+        cell.addEventListener("click", () => { location.hash = `/day/${iso}`; });
+      }
+      grid.appendChild(cell);
+    }
+    month.appendChild(grid);
+    months.appendChild(month);
+    m++;
+    if (m > 12) { m = 1; y++; }
+  }
+  box.appendChild(months);
+  wrap.appendChild(box);
+}
+
+/* ---------- share card ----------
+   A typographic image of the story (no remote photos — cross-origin images
+   taint the canvas), rendered on demand and handed to the native share sheet. */
+
+function cardWrapText(x, text, maxWidth, maxLines) {
+  const words = (text || "").split(/\s+/).filter(Boolean);
+  const lines = [];
+  let line = "";
+  for (const w of words) {
+    const probe = line ? line + " " + w : w;
+    if (x.measureText(probe).width > maxWidth && line) {
+      lines.push(line);
+      line = w;
+      if (lines.length === maxLines) break;
+    } else {
+      line = probe;
+    }
+  }
+  if (lines.length < maxLines && line) lines.push(line);
+  else if (lines.length === maxLines && line) lines[maxLines - 1] = lines[maxLines - 1].replace(/\s+\S*$/, "") + "…";
+  return lines;
+}
+
+async function shareStoryCard(story, date) {
+  const W = 1080, H = 1350, P = 96;
+  const c = document.createElement("canvas");
+  c.width = W;
+  c.height = H;
+  const x = c.getContext("2d");
+  const SERIF = "Georgia, 'Times New Roman', serif";
+  const SANS = "-apple-system, 'Helvetica Neue', Arial, sans-serif";
+
+  x.fillStyle = "#fafaf7";
+  x.fillRect(0, 0, W, H);
+
+  // masthead
+  x.textAlign = "center";
+  x.fillStyle = "#99a1ab";
+  if ("letterSpacing" in x) x.letterSpacing = "8px";
+  x.font = `700 30px ${SERIF}`;
+  x.fillText("REAL ESTATE BRIEFING", W / 2, P + 10);
+  if ("letterSpacing" in x) x.letterSpacing = "0px";
+  x.font = `400 26px ${SANS}`;
+  x.fillText(formatDate(date, { weekday: "long", month: "long", day: "numeric", year: "numeric" }), W / 2, P + 58);
+  x.strokeStyle = "#14181d";
+  x.lineWidth = 3;
+  x.beginPath();
+  x.moveTo(P, P + 100);
+  x.lineTo(W - P, P + 100);
+  x.stroke();
+
+  let y = P + 190;
+  x.textAlign = "left";
+
+  // section kicker
+  if (story.section) {
+    x.fillStyle = "#2158a8";
+    x.font = `700 28px ${SANS}`;
+    if ("letterSpacing" in x) x.letterSpacing = "3px";
+    x.fillText(story.section.toUpperCase(), P, y);
+    if ("letterSpacing" in x) x.letterSpacing = "0px";
+    y += 64;
+  }
+
+  // headline
+  x.fillStyle = "#14181d";
+  x.font = `700 78px ${SERIF}`;
+  for (const line of cardWrapText(x, story.title, W - 2 * P, 5)) {
+    x.fillText(line, P, y);
+    y += 92;
+  }
+  y += 22;
+
+  // summary
+  x.fillStyle = "#59626d";
+  x.font = `400 37px ${SANS}`;
+  for (const line of cardWrapText(x, story.summary || "", W - 2 * P, 5)) {
+    x.fillText(line, P, y);
+    y += 54;
+  }
+  y += 40;
+
+  // chips
+  const chips = [];
+  if (story.dealType) chips.push(story.dealType);
+  if (story.market) chips.push(story.market);
+  const v = fmtValue(story.valueUsd);
+  if (v) chips.push(v);
+  const per = derivedMetric(story);
+  if (per) chips.push(per);
+  x.font = `600 30px ${SANS}`;
+  let cx = P;
+  for (const text of chips) {
+    const w = x.measureText(text).width + 44;
+    if (cx + w > W - P) break;
+    x.strokeStyle = "#d7dbe0";
+    x.lineWidth = 2;
+    x.beginPath();
+    x.roundRect(cx, y - 40, w, 58, 29);
+    x.stroke();
+    x.fillStyle = "#14181d";
+    x.fillText(text, cx + 22, y);
+    cx += w + 18;
+  }
+
+  // footer
+  const fy = H - P - 40;
+  x.strokeStyle = "#e6e9ed";
+  x.lineWidth = 2;
+  x.beginPath();
+  x.moveTo(P, fy - 52);
+  x.lineTo(W - P, fy - 52);
+  x.stroke();
+  x.fillStyle = "#59626d";
+  x.font = `600 28px ${SANS}`;
+  x.fillText(storyPublishers(story, false).slice(0, 2).join(" · "), P, fy);
+  x.textAlign = "right";
+  x.fillStyle = "#99a1ab";
+  x.font = `400 26px ${SANS}`;
+  x.fillText("briefing.pierrepontcompanies.com", W - P, fy);
+  x.textAlign = "left";
+
+  const blob = await new Promise((r) => c.toBlob(r, "image/png"));
+  if (!blob) { flashToast("Couldn't render the card"); return; }
+  const file = new File([blob], `${story.id}.png`, { type: "image/png" });
+  try {
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      await navigator.share({ files: [file], title: story.title });
+      return;
+    }
+  } catch (e) {
+    if (e && e.name === "AbortError") return; // user closed the share sheet
+  }
+  // desktop / unsupported: open the card in a tab to save manually
+  window.open(URL.createObjectURL(blob), "_blank", "noopener");
+}
+
+/* ---------- system status ---------- */
+
+async function readHeartbeatRow() {
+  try {
+    const rows = await sb("secrets?id=eq.fill_heartbeat&select=data");
+    return rows[0]?.data || null;
+  } catch { return null; }
+}
+
+function ageMin(iso) {
+  return iso ? (Date.now() - Date.parse(iso)) / 60000 : Infinity;
+}
+
+function missingContent(day) {
+  return (day?.stories || []).filter((s) =>
+    s.url && contentWords(s) < 120 && !s.sourceBlocked);
+}
+
+async function paintHealthDot(day) {
+  const dot = $("health-dot");
+  if (!dot) return;
+  const hb = await readHeartbeatRow();
+  const age = ageMin(hb?.lastRun);
+  const missing = missingContent(day).length;
+  const cls = age > 180 ? "bad" : (age > 90 || missing ? "warn" : "ok");
+  dot.className = "health-dot " + cls;
+}
+
+function statusCard(title) {
+  const card = document.createElement("div");
+  card.className = "status-card";
+  const h = document.createElement("div");
+  h.className = "status-title";
+  h.textContent = title;
+  card.appendChild(h);
+  return card;
+}
+
+function statusRow(card, label, value, cls) {
+  const row = document.createElement("div");
+  row.className = "status-row";
+  const l = document.createElement("span");
+  l.className = "status-label";
+  l.textContent = label;
+  const r = document.createElement("span");
+  r.className = "status-value" + (cls ? " " + cls : "");
+  r.textContent = value;
+  row.append(l, r);
+  card.appendChild(row);
+  return row;
+}
+
+function fmtAge(min) {
+  if (!isFinite(min)) return "never";
+  if (min < 60) return `${Math.round(min)} min ago`;
+  if (min < 48 * 60) return `${Math.round(min / 60)} h ago`;
+  return `${Math.round(min / 1440)} d ago`;
+}
+
+async function renderStatus() {
+  const wrap = $("status-content");
+  wrap.innerHTML = "";
+
+  const head = document.createElement("div");
+  head.className = "status-head";
+  head.innerHTML = `<h2>System status</h2><p>The pipeline behind the briefing — content filling, sources, and sessions.</p>`;
+  wrap.appendChild(head);
+
+  const latest = state.dates[state.dates.length - 1];
+  const [day, hb] = await Promise.all([getDay(latest), readHeartbeatRow()]);
+  let secretsMeta = [];
+  try { secretsMeta = await sb("secrets?id=in.(trd_session,session_bisnow.com)&select=id,data,updated_at"); } catch { /* offline */ }
+  let ratesAt = null;
+  try { const r = await sb("rates_cache?id=eq.1&select=generated_at"); ratesAt = r[0]?.generated_at || null; } catch { /* offline */ }
+
+  const briefingCard = statusCard("Today's briefing");
+  if (day) {
+    const stories = day.stories || [];
+    statusRow(briefingCard, "Date", formatDate(day.date, { weekday: "long", month: "long", day: "numeric" }));
+    statusRow(briefingCard, "Last compiled", day.generatedAt
+      ? new Date(day.generatedAt).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }) : "—");
+    statusRow(briefingCard, "Stories", `${stories.length} (${stories.filter((s) => s.featured).length} top · ${stories.filter((s) => s.brief).length} briefs)`);
+    if (day.notes) statusRow(briefingCard, "Notes", day.notes);
+  } else {
+    statusRow(briefingCard, "Date", "no briefing loaded", "warn");
+  }
+  wrap.appendChild(briefingCard);
+
+  const contentCard = statusCard("Article content");
+  if (day) {
+    const withUrl = (day.stories || []).filter((s) => s.url);
+    const missing = missingContent(day);
+    const blocked = (day.stories || []).filter((s) => s.sourceBlocked);
+    statusRow(contentCard, "Full text in-app",
+      `${withUrl.length - missing.length - blocked.length} of ${withUrl.length}`,
+      missing.length ? "warn" : "ok");
+    for (const s of missing) statusRow(contentCard, s.id, "waiting on the fill loop", "warn");
+    for (const s of blocked) statusRow(contentCard, s.id, "reads at source (unfetchable)");
+  }
+  wrap.appendChild(contentCard);
+
+  const hbCard = statusCard("Content heartbeat");
+  const hbAge = ageMin(hb?.lastRun);
+  statusRow(hbCard, "Last filler run", fmtAge(hbAge), hbAge > 180 ? "bad" : hbAge > 90 ? "warn" : "ok");
+  if (hb) {
+    statusRow(hbCard, "Ran via", hb.via || "—");
+    statusRow(hbCard, "That run", `${hb.filled ?? 0} filled · ${hb.failed ?? 0} failed`);
+  }
+  const hbNote = document.createElement("p");
+  hbNote.className = "status-note";
+  hbNote.textContent = "GitHub Actions fills every 30 min; a stale pulse wakes the cloud routine, the Supabase standby, then the Mac watchdog.";
+  hbCard.appendChild(hbNote);
+  wrap.appendChild(hbCard);
+
+  const srcCard = statusCard("Sources today");
+  const EXPECTED = ["The Real Deal", "Inman", "CRE Daily", "CRE Daily New York", "Traded", "Bisnow"];
+  const tally = new Map();
+  for (const s of day?.stories || []) {
+    for (const src of s.sources || []) tally.set(src, (tally.get(src) || 0) + 1);
+  }
+  for (const name of EXPECTED) {
+    const n = [...tally.entries()].filter(([k]) => k.includes(name)).reduce((sum, [, v]) => sum + v, 0);
+    statusRow(srcCard, name, n ? `${n} ${n === 1 ? "story" : "stories"}` : "nothing today", n ? "" : "quiet");
+  }
+  for (const [k, v] of tally) {
+    if (!EXPECTED.some((e) => k.includes(e))) statusRow(srcCard, k, `${v} ${v === 1 ? "story" : "stories"}`);
+  }
+  wrap.appendChild(srcCard);
+
+  const sysCard = statusCard("Sessions & rates");
+  for (const [id, label] of [["trd_session", "The Real Deal session"], ["session_bisnow.com", "Bisnow session"]]) {
+    const row = secretsMeta.find((r) => r.id === id);
+    const at = row?.data?.savedAt || row?.updated_at;
+    statusRow(sysCard, label, at ? `saved ${fmtAge(ageMin(at))}` : "not stored",
+      at && ageMin(at) / 1440 > 45 ? "warn" : "ok");
+  }
+  const rAge = ageMin(ratesAt);
+  statusRow(sysCard, "Rates cache", fmtAge(rAge), rAge > 120 ? "warn" : "ok");
+  wrap.appendChild(sysCard);
 }
 
 /* ---------- boot ---------- */
