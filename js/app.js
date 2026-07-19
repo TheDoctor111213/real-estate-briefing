@@ -108,14 +108,18 @@ async function init() {
   $("prev-day").addEventListener("click", () => stepDay(-1));
   $("next-day").addEventListener("click", () => stepDay(1));
 
-  // the wordmark refreshes when you're already on the briefing (data AND app
-  // updates — see hardRefresh); from any other view it just navigates home
+  // the wordmark ALWAYS returns to the current day — from an older day, from
+  // any tab, from anywhere. Only when you're already on today does it refresh
+  // instead (data AND app updates — see hardRefresh).
   document.querySelector(".wordmark").addEventListener("click", (e) => {
+    e.preventDefault();
+    const latest = state.dates[state.dates.length - 1] || null;
     const h = location.hash;
-    if (h === "" || h === "#/" || h.startsWith("#/day/")) {
-      e.preventDefault();
-      hardRefresh();
-    }
+    const onBriefing = h === "" || h === "#/" || h.startsWith("#/day/");
+    if (onBriefing && state.currentDate === latest) { hardRefresh(); return; }
+    state.currentDate = latest;
+    if (h === "" || h === "#/") route(); // hash unchanged → no hashchange event
+    else location.hash = "/";
   });
 
   $("search-btn").addEventListener("click", () => { location.hash = "/search"; });
