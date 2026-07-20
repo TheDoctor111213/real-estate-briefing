@@ -5,7 +5,7 @@
    History has no tab of its own — it's reached by tapping the masthead date. It still gets a hash route.
    Data lives in Supabase (public-read); the pipeline upserts via scripts/push_data.py. */
 
-const APP_VERSION = "v53";
+const APP_VERSION = "v54";
 const SUPABASE_URL = "https://uhwdnmbxiopfysodydty.supabase.co";
 const SUPABASE_KEY = "sb_publishable_LEQ5_-jjcRRl2p0wlaiXcw_RX4Wf8-y";
 
@@ -104,6 +104,9 @@ const state = {
   threads: null,       // story arcs (cross-day timelines)
   events: null,        // dated catalysts (the calendar)
   metrics: null,       // cited industry figures (market metrics)
+  calView: "agenda",   // calendar layout: "agenda" | "month"
+  calMonth: null,      // month shown in grid view (YYYY-MM)
+  calDay: null,        // day selected in grid view (YYYY-MM-DD)
   trendFilters: { market: null, asset: null, type: null }, // Deal Ledger filters
   searchQuery: "",
   reader: null,        // { story, date } currently open in the reader
@@ -4688,13 +4691,36 @@ async function renderCalendar() {
   const wrap = $("calendar-content");
   wrap.innerHTML = "";
   wrap.appendChild(pageHead("Calendar",
-    "Dated catalysts pulled from the briefing — auctions, court dates, policy deadlines, Fed decisions. Star one to be reminded the morning it lands."));
+    "Dated catalysts pulled from the briefing — auctions, court dates, policy deadlines, Fed decisions. Tap one to read the story it came from; star it to be reminded the morning it lands."));
   const events = await getEvents();
   if (!events.length) {
     wrap.appendChild(emptyPanel("Nothing scheduled yet",
-      "As stories name concrete dated events, they gather here as an agenda you can star for reminders."));
+      "As stories name concrete dated events, they gather here — as an agenda and a month calendar — each tapping through to its source story."));
     return;
   }
+
+  // resolve each event's source story so rows can tap through to the reader
+  const days = await getAllDays();
+  const storyIndex = new Map();
+  for (const d of days) for (const s of (d.stories || [])) storyIndex.set(d.date + "|" + s.id, { ...s, _date: d.date });
+
+  // Agenda / Month layout toggle
+  const toggle = document.createElement("div");
+  toggle.className = "cal-toggle";
+  for (const [key, label] of [["agenda", "Agenda"], ["month", "Month"]]) {
+    const b = document.createElement("button");
+    b.textContent = label;
+    b.className = state.calView === key ? "on" : "";
+    b.addEventListener("click", () => { state.calView = key; renderCalendar(); });
+    toggle.appendChild(b);
+  }
+  wrap.appendChild(toggle);
+
+  if (state.calView === "month") renderCalendarMonth(wrap, events, storyIndex);
+  else renderCalendarAgenda(wrap, events, storyIndex);
+}
+
+function renderCalendarAgenda(wrap, events, storyIndex) {
   const today = todayISO();
   const upcoming = events.filter((e) => (e.date || "") >= today)
     .sort((a, b) => (a.date || "").localeCompare(b.date || ""));
@@ -4705,29 +4731,114 @@ async function renderCalendar() {
     wrap.appendChild(subHead("Upcoming", null));
     const g = document.createElement("div");
     g.className = "cal-list";
-    for (const e of upcoming) g.appendChild(eventRow(e, false));
+    for (const e of upcoming) g.appendChild(eventRow(e, false, storyIndex));
     wrap.appendChild(g);
   }
   if (past.length) {
     wrap.appendChild(subHead("Passed", null));
     const g = document.createElement("div");
     g.className = "cal-list";
-    for (const e of past.slice(0, 40)) g.appendChild(eventRow(e, true));
+    for (const e of past.slice(0, 40)) g.appendChild(eventRow(e, true, storyIndex));
     wrap.appendChild(g);
   }
 }
 
-function eventRow(e, isPast) {
+function shiftMonth(ym, delta) {
+  let [y, m] = ym.split("-").map(Number);
+  m += delta;
+  while (m < 1) { m += 12; y--; }
+  while (m > 12) { m -= 12; y++; }
+  return `${y}-${String(m).padStart(2, "0")}`;
+}
+
+function renderCalendarMonth(wrap, events, storyIndex) {
+  const today = todayISO();
+  const byDate = new Map();
+  for (const e of events) { (byDate.get(e.date) || byDate.set(e.date, []).get(e.date)).push(e); }
+
+  // default to the month of the nearest upcoming event (else the latest event)
+  if (!state.calMonth) {
+    const upcoming = events.map((e) => e.date).filter((d) => d >= today).sort();
+    const all = events.map((e) => e.date).sort();
+    state.calMonth = (upcoming[0] || all[all.length - 1] || today).slice(0, 7);
+  }
+  const [Y, M] = state.calMonth.split("-").map(Number);
+
+  // month nav
+  const nav = document.createElement("div");
+  nav.className = "cal-nav";
+  const prev = document.createElement("button");
+  prev.className = "cal-navbtn"; prev.textContent = "‹"; prev.setAttribute("aria-label", "Previous month");
+  prev.addEventListener("click", () => { state.calMonth = shiftMonth(state.calMonth, -1); state.calDay = null; renderCalendar(); });
+  const label = document.createElement("div");
+  label.className = "cal-nav-label";
+  label.textContent = new Date(Y, M - 1, 1).toLocaleDateString("en-US", { month: "long", year: "numeric" });
+  const next = document.createElement("button");
+  next.className = "cal-navbtn"; next.textContent = "›"; next.setAttribute("aria-label", "Next month");
+  next.addEventListener("click", () => { state.calMonth = shiftMonth(state.calMonth, 1); state.calDay = null; renderCalendar(); });
+  nav.append(prev, label, next);
+  wrap.appendChild(nav);
+
+  // grid
+  const grid = document.createElement("div");
+  grid.className = "cal-grid";
+  for (const w of ["S", "M", "T", "W", "T", "F", "S"]) {
+    const h = document.createElement("div"); h.className = "cal-wd"; h.textContent = w; grid.appendChild(h);
+  }
+  const startDow = new Date(Y, M - 1, 1).getDay();
+  const daysInMonth = new Date(Y, M, 0).getDate();
+  for (let i = 0; i < startDow; i++) { const c = document.createElement("div"); c.className = "cal-cell blank"; grid.appendChild(c); }
+  let firstEventDay = null;
+  for (let d = 1; d <= daysInMonth; d++) {
+    const iso = `${Y}-${String(M).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+    const evs = byDate.get(iso) || [];
+    const cell = document.createElement(evs.length ? "button" : "div");
+    cell.className = "cal-cell" + (evs.length ? " has" : "") + (iso === today ? " today" : "") + (iso === state.calDay ? " sel" : "");
+    const num = document.createElement("span"); num.className = "cal-num"; num.textContent = d; cell.appendChild(num);
+    if (evs.length) {
+      const dot = document.createElement("span"); dot.className = "cal-dot"; cell.appendChild(dot);
+      if (!firstEventDay) firstEventDay = iso;
+      cell.addEventListener("click", () => { state.calDay = iso; renderCalendar(); });
+    }
+    grid.appendChild(cell);
+  }
+  wrap.appendChild(grid);
+
+  // detail for the selected day (default: first event day in the shown month)
+  const sel = (state.calDay && state.calDay.slice(0, 7) === state.calMonth) ? state.calDay : firstEventDay;
+  if (sel) {
+    const [sy, sm, sd] = sel.split("-").map(Number);
+    const head = document.createElement("div");
+    head.className = "cal-detail-head";
+    head.textContent = new Date(sy, sm - 1, sd).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
+    wrap.appendChild(head);
+    const list = document.createElement("div");
+    list.className = "cal-list";
+    for (const e of byDate.get(sel) || []) list.appendChild(eventRow(e, sel < today, storyIndex));
+    wrap.appendChild(list);
+  } else {
+    const p = document.createElement("p");
+    p.className = "cal-none";
+    p.textContent = "No events this month.";
+    wrap.appendChild(p);
+  }
+}
+
+function eventRow(e, isPast, storyIndex) {
+  const src = (e.announcedBy && e.announcedBy[e.announcedBy.length - 1]) || null;
+  const srcStory = (src && storyIndex) ? storyIndex.get(src.day + "|" + src.id) : null;
+
   const row = document.createElement("div");
   row.className = "cal-row" + (isPast ? " past" : "");
+
+  // the whole card (minus the star) taps through to the source story
+  const open = document.createElement(src ? "button" : "div");
+  open.className = "cal-open";
+
   const date = document.createElement("div");
   date.className = "cal-date";
-  const mo = document.createElement("div");
-  mo.className = "cal-mo";
-  mo.textContent = formatDate(e.date, { month: "short" });
-  const dd = document.createElement("div");
-  dd.className = "cal-dd";
-  dd.textContent = formatDate(e.date, { day: "numeric" });
+  const mo = document.createElement("div"); mo.className = "cal-mo"; mo.textContent = formatDate(e.date, { month: "short" });
+  const dd = document.createElement("div"); dd.className = "cal-dd"; dd.textContent = formatDate(e.date, { day: "numeric" });
   date.append(mo, dd);
 
   const body = document.createElement("div");
@@ -4740,18 +4851,22 @@ function eventRow(e, isPast) {
   if (e.market && e.market !== "National") bits.push(e.market);
   if (e.approx === "month") bits.push("date approx.");
   if (bits.length) {
-    const m = document.createElement("div");
-    m.className = "cal-meta";
-    m.textContent = bits.join(" · ");
+    const m = document.createElement("div"); m.className = "cal-meta"; m.textContent = bits.join(" · ");
     body.appendChild(m);
   }
   if (e.resolvedBy?.outcome) {
-    const r = document.createElement("div");
-    r.className = "cal-outcome";
-    r.textContent = "✓ " + e.resolvedBy.outcome;
+    const r = document.createElement("div"); r.className = "cal-outcome"; r.textContent = "✓ " + e.resolvedBy.outcome;
     body.appendChild(r);
   }
-  row.append(date, body);
+  if (src) {
+    const s = document.createElement("div");
+    s.className = "cal-src";
+    s.textContent = srcStory ? `From: ${srcStory.title} →` : "Read the source story →";
+    body.appendChild(s);
+  }
+  open.append(date, body);
+  if (src) open.addEventListener("click", () => { location.hash = `/story/${src.day}/${src.id}`; });
+  row.appendChild(open);
 
   // star to opt into a morning-of reminder (push-dispatch reads starEvents)
   if (!isPast && !e.resolvedBy) {
