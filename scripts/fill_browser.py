@@ -75,78 +75,77 @@ def fetch_with_browser(page, url: str) -> tuple[str, str]:
     return page.content(), page.url
 
 
-def main() -> int:
-    args = [a for a in sys.argv[1:] if not a.startswith("--")]
-    no_push = "--no-push" in sys.argv
-    date = args[0] if args else fill_content._today()
+# How many trailing days (besides today) a no-date run also sweeps for
+# stragglers. Older days rolled off "today" would otherwise never get another
+# real-browser attempt; this backfills any that were missed (a Cloudflare wall
+# that later clears, a wrapper the browser can now follow, a late-arriving edit).
+BACKFILL_DAYS = 4
 
+
+def _recent_dates(today: str) -> list[str]:
+    from datetime import date as _d, timedelta
+    y, m, dd = map(int, today.split("-"))
+    base = _d(y, m, dd)
+    return [(base - timedelta(days=i)).isoformat() for i in range(BACKFILL_DAYS + 1)]
+
+
+def _fill_one_day(page, ctx, cookied: set, date: str, no_push: bool) -> tuple[int, int]:
+    """Fill every straggler in one day with the shared browser. Returns
+    (filled, failed). A day with nothing missing is a fast no-op (no fetches)."""
     day, path = fill_content._load_local(date)
     source = "local file"
     if day is None:
         day = fill_content._load_supabase(date)
         source = "Supabase"
     if day is None:
-        print(f"No day found for {date}.")
-        fill_content.record_heartbeat(date, 0, 0, "")
-        return 0  # nothing to do is a clean outcome for a heartbeat
+        return 0, 0
 
     stories = day.get("stories") or []
     targets = [s for s in stories
                if fill_content._words(s.get("content")) < fill_content.MIN_WORDS
                and s.get("url")]
-    print(f"{date} ({source}): {len(stories)} stories, {len(targets)} need content")
     if not targets:
-        print("SUMMARY: nothing to fill")
-        fill_content.record_heartbeat(date, 0, 0, "")
-        return 0
-
-    from playwright.sync_api import sync_playwright  # imported late: no-op runs skip it
+        return 0, 0
+    print(f"{date} ({source}): {len(stories)} stories, {len(targets)} need content")
 
     filled, failed, changed_urls = [], [], 0
-    with sync_playwright() as pw:
-        browser = pw.chromium.launch(headless=True)
-        ctx = browser.new_context(user_agent=UA, locale="en-US",
-                                  viewport={"width": 1280, "height": 900})
-        cookied = set()
-        page = ctx.new_page()
-        for s in targets:
-            sid = s.get("id")
-            try:
-                dom = _registrable(urllib.parse.urlparse(s["url"]).netloc)
-                if dom not in cookied:
-                    cookies = _cookies_for(s["url"])
-                    if cookies:
-                        ctx.add_cookies(cookies)
-                    cookied.add(dom)
-                html, final = fetch_with_browser(page, s["url"])
-                res = fetch_article.extract_from_html(html, s["url"], final)
-                # canonical URL: a tracking wrapper that resolved to a real page
-                if final and fill_content._is_wrapper(s["url"]) and not fill_content._is_wrapper(final):
-                    s["url"] = fill_content._clean_url(final)
-                    changed_urls += 1
-                if res.get("ok") and res["words"] > fill_content._words(s.get("content")) \
-                        and not fetch_article.title_mismatch(s.get("title", ""), res):
-                    s["content"] = res["html"]
-                    if not s.get("image") and res.get("image"):
-                        s["image"] = res["image"]
-                    s.pop("sourceBlocked", None)
-                    filled.append(sid)
-                    print(f"  ✓ {sid:<40} {res['words']} words")
-                elif res.get("ok") and fetch_article.title_mismatch(s.get("title", ""), res):
-                    # url pointed at the wrong article — leave a tap-through, don't
-                    # show mismatched content under this headline
-                    s["sourceBlocked"] = True
-                    failed.append((sid, "headline/article mismatch — url likely mis-paired"))
-                    print(f"  ⤫ {sid:<40} headline/article mismatch")
-                else:
-                    s["sourceBlocked"] = True  # app: card taps through to the source
-                    failed.append((sid, f"{res.get('words', 0)} words"
-                                        + (" (challenge held)" if res.get("blocked") else "")))
-                    print(f"  ✗ {sid:<40} {res.get('words', 0)} words")
-            except Exception as e:  # noqa: BLE001 - one bad page never stops the loop
-                failed.append((sid, str(e)[:70]))
-                print(f"  ✗ {sid:<40} {str(e)[:70]}")
-        browser.close()
+    for s in targets:
+        sid = s.get("id")
+        try:
+            dom = _registrable(urllib.parse.urlparse(s["url"]).netloc)
+            if dom not in cookied:
+                cookies = _cookies_for(s["url"])
+                if cookies:
+                    ctx.add_cookies(cookies)
+                cookied.add(dom)
+            html, final = fetch_with_browser(page, s["url"])
+            res = fetch_article.extract_from_html(html, s["url"], final)
+            # canonical URL: a tracking wrapper that resolved to a real page
+            if final and fill_content._is_wrapper(s["url"]) and not fill_content._is_wrapper(final):
+                s["url"] = fill_content._clean_url(final)
+                changed_urls += 1
+            if res.get("ok") and res["words"] > fill_content._words(s.get("content")) \
+                    and not fetch_article.title_mismatch(s.get("title", ""), res):
+                s["content"] = res["html"]
+                if not s.get("image") and res.get("image"):
+                    s["image"] = res["image"]
+                s.pop("sourceBlocked", None)
+                filled.append(sid)
+                print(f"  ✓ {sid:<40} {res['words']} words")
+            elif res.get("ok") and fetch_article.title_mismatch(s.get("title", ""), res):
+                # url pointed at the wrong article — leave a tap-through, don't
+                # show mismatched content under this headline
+                s["sourceBlocked"] = True
+                failed.append((sid, "headline/article mismatch — url likely mis-paired"))
+                print(f"  ⤫ {sid:<40} headline/article mismatch")
+            else:
+                s["sourceBlocked"] = True  # app: card taps through to the source
+                failed.append((sid, f"{res.get('words', 0)} words"
+                                    + (" (challenge held)" if res.get("blocked") else "")))
+                print(f"  ✗ {sid:<40} {res.get('words', 0)} words")
+        except Exception as e:  # noqa: BLE001 - one bad page never stops the loop
+            failed.append((sid, str(e)[:70]))
+            print(f"  ✗ {sid:<40} {str(e)[:70]}")
 
     if filled or changed_urls:
         day["generatedAt"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -155,16 +154,57 @@ def main() -> int:
         if not no_push:
             try:
                 fill_content._push(day)
-                print("  published updated day to Supabase")
+                print(f"  published {date} to Supabase")
             except Exception as e:  # noqa: BLE001
-                print(f"  WARN push failed: {e}")
+                print(f"  WARN push failed for {date}: {e}")
 
-    fill_content.record_heartbeat(date, len(filled), len(failed), "")
-
-    parts = [f"filled {len(filled)}/{len(targets)}"]
+    parts = [f"{date}: filled {len(filled)}/{len(targets)}"]
     if failed:
-        parts.append(f"{len(failed)} failed ({', '.join(i or '?' for i, _ in failed)}) — retried next run")
-    print("SUMMARY: " + " · ".join(parts))
+        parts.append(f"{len(failed)} still missing")
+    print("  " + " · ".join(parts))
+    return len(filled), len(failed)
+
+
+def main() -> int:
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    no_push = "--no-push" in sys.argv
+    # an explicit date fills just that day; otherwise sweep today + recent days so
+    # stragglers that rolled off "today" still get a real-browser attempt
+    dates = [args[0]] if args else _recent_dates(fill_content._today())
+
+    # cheap pre-check: if NOTHING across the window needs content, skip launching
+    # a browser entirely (the common steady-state — keeps no-op runs seconds long)
+    any_targets = False
+    for date in dates:
+        day, _ = fill_content._load_local(date)
+        if day is None:
+            day = fill_content._load_supabase(date)
+        if day and any(fill_content._words(s.get("content")) < fill_content.MIN_WORDS and s.get("url")
+                       for s in (day.get("stories") or [])):
+            any_targets = True
+            break
+    if not any_targets:
+        print(f"SUMMARY: nothing to fill across {len(dates)} day(s)")
+        fill_content.record_heartbeat(dates[0], 0, 0, "")
+        return 0
+
+    from playwright.sync_api import sync_playwright  # imported late: no-op runs skip it
+
+    total_filled = total_failed = 0
+    with sync_playwright() as pw:
+        browser = pw.chromium.launch(headless=True)
+        ctx = browser.new_context(user_agent=UA, locale="en-US",
+                                  viewport={"width": 1280, "height": 900})
+        cookied: set = set()
+        page = ctx.new_page()
+        for date in dates:
+            f, x = _fill_one_day(page, ctx, cookied, date, no_push)
+            total_filled += f
+            total_failed += x
+        browser.close()
+
+    fill_content.record_heartbeat(dates[0], total_filled, total_failed, "")
+    print(f"SUMMARY: filled {total_filled}, {total_failed} still missing across {len(dates)} day(s)")
     return 0
 
 

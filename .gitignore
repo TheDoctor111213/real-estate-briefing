@@ -9,3 +9,4 @@ data/
 # scratch/skill working dirs that sometimes land under scripts/ — never deploy them
 scripts/pydoll-cf-waf-bypasser-skills/
 scripts/your-project/
+__pycache__/
