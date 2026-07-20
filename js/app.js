@@ -5,7 +5,7 @@
    History has no tab of its own — it's reached by tapping the masthead date. It still gets a hash route.
    Data lives in Supabase (public-read); the pipeline upserts via scripts/push_data.py. */
 
-const APP_VERSION = "v59";
+const APP_VERSION = "v60";
 const SUPABASE_URL = "https://uhwdnmbxiopfysodydty.supabase.co";
 const SUPABASE_KEY = "sb_publishable_LEQ5_-jjcRRl2p0wlaiXcw_RX4Wf8-y";
 
@@ -204,7 +204,9 @@ async function init() {
   sheetCard.addEventListener("touchmove", (e) => {
     if (sheetDragY === null) return;
     const dy = e.touches[0].clientY - sheetDragY;
-    if (dy > 0) { e.preventDefault(); sheetDragMove(e.touches[0].clientY); } // downward = drag; up stays scroll
+    // downward always drags; upward drags too on a story peek (fling up = open),
+    // otherwise upward stays a scroll on tall dossier sheets
+    if (dy > 0 || peekTarget) { e.preventDefault(); sheetDragMove(e.touches[0].clientY); }
   }, { passive: false });
   sheetCard.addEventListener("touchend", () => sheetDragEnd());
   sheetCard.addEventListener("touchcancel", () => sheetDragEnd());
@@ -274,7 +276,12 @@ async function init() {
   feed.addEventListener("touchmove", (e) => {
     if (!ft) return;
     const t = e.touches[0];
-    if (ft.mode === "peek") { e.preventDefault(); sheetDragMove(t.clientY); return; }
+    if (ft.mode === "peek") {
+      e.preventDefault();
+      if (sheetDragY === null) sheetDragStart(t.clientY); // lazy: start where the finger is now
+      sheetDragMove(t.clientY);
+      return;
+    }
     const dx = t.clientX - ft.x, dy = t.clientY - ft.y;
     if (!ft.horiz && !ft.moved && (Math.abs(dx) > 8 || Math.abs(dy) > 8)) {
       ft.moved = true; clearTimeout(ft.timer);
@@ -3275,8 +3282,12 @@ let flashTimer = null;
 function onReaderScroll() {
   const r = $("reader");
   if (r.hidden || !state.reader) return;
-  readerScrollPos[readMark(state.reader.date, state.reader.story.id)] = r.scrollTop;
+  const { date, story } = state.reader;
+  readerScrollPos[readMark(date, story.id)] = r.scrollTop;
   updateTimeLeft();
+  // mark read once you've actually gotten ~5/6 of the way down
+  const max = r.scrollHeight - r.clientHeight;
+  if (max > 40 && r.scrollTop / max > 0.83 && !isRead(date, story.id)) setRead(date, story.id, true);
 }
 
 function updateTimeLeft() {
@@ -3415,9 +3426,6 @@ async function openReaderRoute(date, id) {
   renderReaderNext();
   applyTextScale();
 
-  // opening a story marks it read (dims its feed card); dim its progress seg too
-  setRead(date, story.id, true);
-
   // section interstitial when a swipe crosses into a new section
   const flash = $("reader-flash");
   flash.hidden = true;
@@ -3441,6 +3449,11 @@ async function openReaderRoute(date, id) {
   // scroll-position memory: return to where you left this story, else the top
   reader.scrollTop = readerScrollPos[readMark(date, story.id)] || 0;
   updateTimeLeft();
+  // a short article that doesn't scroll is fully seen on open → mark it read
+  requestAnimationFrame(() => {
+    if (state.reader && state.reader.story.id === story.id &&
+        reader.scrollHeight - reader.clientHeight <= 40) setRead(date, story.id, true);
+  });
 }
 
 /* ---------- multi-outlet coverage in the reader ----------
@@ -3564,6 +3577,7 @@ function openSheet(build) {
   card.style.transform = "";    // CSS .open rise/fall animates cleanly
   build(card);
   sheet.hidden = false;
+  document.body.classList.add("sheet-open"); // suppresses page-wide text selection
   requestAnimationFrame(() => sheet.classList.add("open"));
 }
 
@@ -3573,6 +3587,7 @@ function closeSheet() {
   card.style.transition = ""; card.style.transform = ""; // let CSS animate the fall
   peekTarget = null; sheetDragY = null;
   sheet.classList.remove("open");
+  document.body.classList.remove("sheet-open");
   setTimeout(() => { sheet.hidden = true; }, 260);
 }
 
@@ -3616,14 +3631,20 @@ function sheetDismiss() {
   c.style.transition = "transform .24s cubic-bezier(.35,0,.7,1)";
   c.style.transform = "translateY(110%)";
   peekTarget = null; sheetDragY = null;
-  setTimeout(() => { const s = $("sheet"); s.classList.remove("open"); s.hidden = true; }, 210);
+  document.body.classList.remove("sheet-open");
+  setTimeout(() => { const s = $("sheet"); s.classList.remove("open"); s.hidden = true; }, 220);
 }
 function sheetOpenStory() {
   const t = peekTarget; peekTarget = null; sheetDragY = null;
+  document.body.classList.remove("sheet-open");
   const c = $("sheet-card");
-  c.style.transition = "transform .16s ease-out";
-  c.style.transform = "translateY(-6px)";
-  setTimeout(() => { const s = $("sheet"); s.classList.remove("open"); s.hidden = true; if (t) location.hash = `/story/${t.date}/${t.id}`; }, 140);
+  c.style.transition = "transform .18s ease-out, opacity .18s ease";
+  c.style.transform = "translateY(-10px)"; c.style.opacity = "0";
+  setTimeout(() => {
+    const s = $("sheet"); s.classList.remove("open"); s.hidden = true;
+    c.style.opacity = "";
+    if (t) location.hash = `/story/${t.date}/${t.id}`;
+  }, 170);
 }
 
 // long-press peek: summary + hero in a sheet; the long-press finger keeps
@@ -3637,7 +3658,10 @@ function openStoryPeek(date, id, fromY) {
       const fig = document.createElement("div");
       fig.className = "peek-hero";
       const img = document.createElement("img");
-      img.src = story.image; img.alt = "";
+      img.alt = ""; img.draggable = false;
+      img.onload = () => img.classList.add("loaded");   // fade in, no pop
+      img.src = story.image;
+      if (img.complete) img.classList.add("loaded");    // cached: show at once
       fig.appendChild(img);
       card.appendChild(fig);
     }
@@ -3661,7 +3685,9 @@ function openStoryPeek(date, id, fromY) {
       card.appendChild(open);
     }
   });
-  if (fromY != null) sheetDragStart(fromY);
+  // NB: we do NOT start the drag here — the feed handler lazy-starts it on the
+  // first finger move (capturing the finger's position then), so the card never
+  // snaps from mid-rise to the finger. `fromY` is unused now, kept for clarity.
 }
 
 async function openPlayerSheet(slug) {
