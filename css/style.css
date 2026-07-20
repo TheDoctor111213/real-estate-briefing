@@ -2279,6 +2279,9 @@ button,
   border: none; border-radius: 999px; padding: 9px 20px; cursor: pointer;
   -webkit-tap-highlight-color: transparent;
 }
+/* opened-directly-at-the-end: a compact way back, no finish-line celebration */
+.reader-done.minimal { padding: 14px; background: none; border-color: transparent; }
+.reader-done.minimal .rd-back { color: var(--accent); background: none; border: 1px solid var(--rule); }
 
 /* read-state: cards you've opened or marked read dim subtly */
 .story.is-read { opacity: 0.58; }

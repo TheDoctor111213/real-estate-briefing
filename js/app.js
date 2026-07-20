@@ -5,7 +5,7 @@
    History has no tab of its own — it's reached by tapping the masthead date. It still gets a hash route.
    Data lives in Supabase (public-read); the pipeline upserts via scripts/push_data.py. */
 
-const APP_VERSION = "v71";
+const APP_VERSION = "v72";
 const SUPABASE_URL = "https://uhwdnmbxiopfysodydty.supabase.co";
 const SUPABASE_KEY = "sb_publishable_LEQ5_-jjcRRl2p0wlaiXcw_RX4Wf8-y";
 // Mapbox public token — a pk.* token is meant to ship to browsers, but GitHub's
@@ -1223,12 +1223,18 @@ function renderCatchup(feed, day) {
   head.append(label, count, clear);
   box.appendChild(head);
 
+  // the catch-up list is its own little reader sequence, in strip order (new,
+  // then updated) — opening any row swipes through ONLY these, so "caught up"
+  // means caught up on what's NEW, not the whole feed
+  const scopeIds = [...fresh, ...updated].filter(isExpandable).map((s) => s.id);
   const addRow = (s, tag) => {
     const row = document.createElement("button");
     row.className = "catchup-row";
     row.addEventListener("click", () => {
-      if (isExpandable(s)) location.hash = `/story/${day.date}/${s.id}`;
-      else if (s.url) window.open(s.url, "_blank", "noopener");
+      if (isExpandable(s)) {
+        state.readerScope = { type: "catchup", date: day.date, ids: scopeIds };
+        location.hash = `/story/${day.date}/${s.id}`;
+      } else if (s.url) window.open(s.url, "_blank", "noopener");
     });
     const b = document.createElement("span");
     b.className = "catchup-tag" + (tag === "updated" ? " upd" : "");
@@ -4218,6 +4224,17 @@ function feedOrder(day) {
 }
 
 function buildReaderNav(day, story) {
+  // opened from the catch-up strip → a mini-sequence scoped to just the new/updated
+  // stories, in strip order. Only while the opened story is actually in that set;
+  // opening anything else (a feed card, a key point, a search hit) forgets the scope
+  // and restores the full-feed order.
+  const scope = state.readerScope;
+  if (scope && scope.type === "catchup" && scope.date === day.date && scope.ids.includes(story.id)) {
+    const byId = new Map((day.stories || []).map((s) => [s.id, s]));
+    const list = scope.ids.map((id) => byId.get(id)).filter(Boolean).filter(isExpandable);
+    return { date: day.date, list, idx: list.findIndex((s) => s.id === story.id), scope: "catchup" };
+  }
+  state.readerScope = null;
   const list = feedOrder(day);
   return { date: day.date, list, idx: list.findIndex((s) => s.id === story.id) };
 }
@@ -4277,21 +4294,42 @@ function renderReaderNext() {
     btn.append(k, t);
     btn.addEventListener("click", () => readerGo(nav.date, next.id));
     box.appendChild(btn);
+  } else if (!state.readerNavigated) {
+    // you opened the last story directly rather than swiping to it — no finish-line
+    // ritual (and no "N stories · M min" you didn't actually read), just a way back
+    const card = document.createElement("div");
+    card.className = "reader-done minimal";
+    const back = document.createElement("button");
+    back.className = "rd-back";
+    back.textContent = "Back to the briefing";
+    back.addEventListener("click", () => closeReaderNav());
+    card.appendChild(back);
+    box.appendChild(card);
   } else {
-    // end of the feed — the ritual gets a finish line
+    // reached the end by swiping through — the ritual gets its finish line
+    const scoped = nav.scope === "catchup";
     const mins = nav.list.reduce((sum, s) => sum + (readMinutes(s) || 0), 0);
     const card = document.createElement("div");
     card.className = "reader-done";
     const h = document.createElement("div");
     h.className = "rd-head";
-    h.textContent = "You're caught up ✓";
+    h.textContent = scoped ? "Caught up on what's new ✓" : "You're caught up ✓";
     const m = document.createElement("div");
     m.className = "rd-meta";
-    m.textContent = `${nav.list.length} ${nav.list.length === 1 ? "story" : "stories"}${mins ? ` · ${mins} min` : ""}`;
+    m.textContent = scoped
+      ? `${nav.list.length} new ${nav.list.length === 1 ? "story" : "stories"} — now part of the briefing`
+      : `${nav.list.length} ${nav.list.length === 1 ? "story" : "stories"}${mins ? ` · ${mins} min` : ""}`;
     const back = document.createElement("button");
     back.className = "rd-back";
     back.textContent = "Back to the briefing";
-    back.addEventListener("click", () => closeReaderNav());
+    back.addEventListener("click", () => {
+      // swiping through the new set folds it into the main feed (the strip clears)
+      if (scoped && state.readerDay) {
+        setPref("seen", snapshotDay(state.readerDay));
+        state.readerScope = null;
+      }
+      closeReaderNav();
+    });
     card.append(h, m, back);
     box.appendChild(card);
   }
@@ -4455,6 +4493,11 @@ async function openReaderRoute(date, id) {
 
   // swipe/keyboard navigation context + progress + the next-up card
   state.readerNav = buildReaderNav(day, story);
+  state.readerDay = day;
+  // "You're caught up" is earned by swiping to the end — not by cold-opening a
+  // story that merely happens to be last. readerStepFlash is set only when we got
+  // here via a prev/next step, so it tells us whether the finish line was reached.
+  state.readerNavigated = readerStepFlash;
   renderReaderProgress();
   renderReaderNext();
   applyTextScale();
