@@ -2353,6 +2353,16 @@ body.sheet-open, body.sheet-open * {
   font-size: 9.5px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase;
   color: var(--accent); margin-bottom: 6px;
 }
+/* national series (blue) vs a single-market print (amber) read very differently —
+   color-code both the geography tag and a left accent so they never blur together */
+.metric-geo.geo-national { color: var(--accent); }
+.metric-geo.geo-regional { color: #c2740a; }
+.metric-card.mc-national { border-left: 3px solid color-mix(in srgb, var(--accent) 55%, transparent); }
+.metric-card.mc-regional { border-left: 3px solid color-mix(in srgb, #d98324 62%, transparent); }
+@media (prefers-color-scheme: dark) {
+  .metric-geo.geo-regional { color: #e8a54b; }
+  .metric-card.mc-regional { border-left-color: color-mix(in srgb, #e8a54b 55%, transparent); }
+}
 
 .comp-sortbar { display: flex; align-items: center; gap: 6px; margin: 4px 0 10px; flex-wrap: wrap; }
 .comp-sort {

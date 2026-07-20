@@ -5,7 +5,7 @@
    History has no tab of its own — it's reached by tapping the masthead date. It still gets a hash route.
    Data lives in Supabase (public-read); the pipeline upserts via scripts/push_data.py. */
 
-const APP_VERSION = "v75";
+const APP_VERSION = "v76";
 const SUPABASE_URL = "https://uhwdnmbxiopfysodydty.supabase.co";
 const SUPABASE_KEY = "sb_publishable_LEQ5_-jjcRRl2p0wlaiXcw_RX4Wf8-y";
 // Mapbox public token — a pk.* token is meant to ship to browsers, but GitHub's
@@ -1046,7 +1046,7 @@ function storyChips(story) {
   // arc chip: this story is a registered thread installment — tap through to the
   // timeline (stop the card's own click so it doesn't open the reader instead)
   if (story.thread) {
-    const arc = chip("🧵 Arc", "chip-arc");
+    const arc = chip("🧵 Thread", "chip-arc");
     arc.setAttribute("role", "link");
     arc.addEventListener("click", (e) => {
       e.preventDefault(); e.stopPropagation();
@@ -2470,19 +2470,20 @@ function leagueRow({ p, count, volume }, rank) {
 
 /* ---------- The Desk: a ranked board of tools ----------
    Every analytical surface is a tap-through card (same language as Calendar and
-   Story Arcs), ordered by strength/interest — the macro backdrop first, then the
-   numbers that sharpen as coverage accumulates. Each opens its own full board. */
+   Threads), ordered by what the reader reaches for most — the running storylines
+   and catalysts first, then the deal-level analytics that sharpen as coverage
+   accumulates, then the macro backdrop. Each opens its own full board. */
 const DESK_CATALOG = [
-  { id: "pulse", icon: "📈", title: "Market Pulse", blurb: "The national backdrop — rates, home prices, rents, credit — in deep, real data" },
+  { id: "threads", icon: "🧵", title: "Threads", blurb: "Running storylines the briefing is tracking — same property, deal, case or company event", hash: "#/threads", feature: true },
+  { id: "calendar", icon: "📅", title: "Calendar", blurb: "Upcoming catalysts — auctions, court dates, Fed decisions", hash: "#/calendar" },
+  { id: "league", icon: "🏆", title: "League Tables", blurb: "Most-active buyers, lenders, developers and brokers" },
   { id: "comps", icon: "🏙️", title: "Comps", blurb: "$/sf and $/unit medians, delineated by market and asset class" },
   { id: "caprates", icon: "🎯", title: "Cap Rates", blurb: "What each market is pricing, straight from deal coverage" },
-  { id: "league", icon: "🏆", title: "League Tables", blurb: "Most-active buyers, lenders, developers and brokers" },
-  { id: "metrics", icon: "📊", title: "Market Metrics", blurb: "Figures the trade press cites — delinquency, vacancy, rents" },
   { id: "distress", icon: "⚠️", title: "Distress Watch", blurb: "Defaults, foreclosures and forced sales as they surface" },
-  { id: "coverage", icon: "🔥", title: "Coverage Pulse", blurb: "What the desks are covering this week versus last" },
   { id: "ledger", icon: "💵", title: "Deal Ledger", blurb: "Every priced deal, filterable and sortable" },
-  { id: "calendar", icon: "📅", title: "Calendar", blurb: "Upcoming catalysts — auctions, court dates, Fed decisions", hash: "#/calendar" },
-  { id: "threads", icon: "🧵", title: "Story Arcs", blurb: "Running storylines the briefing is tracking", hash: "#/threads" },
+  { id: "pulse", icon: "📈", title: "Market Pulse", blurb: "The national backdrop — rates, home prices, rents, credit — in deep, real data" },
+  { id: "metrics", icon: "📊", title: "Market Metrics", blurb: "Figures the trade press cites — delinquency, vacancy, rents" },
+  { id: "coverage", icon: "🔥", title: "Coverage Pulse", blurb: "What the desks are covering this week versus last" },
 ];
 
 async function renderTrends() {
@@ -2521,7 +2522,7 @@ async function renderTrends() {
 
 function deskCard(item, stat) {
   const a = document.createElement("a");
-  a.className = "desk-card" + (item.id === "pulse" ? " dc-feature" : "");
+  a.className = "desk-card" + (item.feature ? " dc-feature" : "");
   a.href = item.hash || `#/desk/${item.id}`;
   a.innerHTML =
     `<span class="dc-icon">${item.icon}</span>` +
@@ -2621,39 +2622,54 @@ function buildMarketPulse(wrap, pulse) {
   // group tabs
   const tabs = document.createElement("div");
   tabs.className = "pulse-tabs";
+  const tabBtns = {};
   for (const [g, label] of PULSE_GROUPS) {
     const b = document.createElement("button");
     b.className = "pulse-tab" + (state.pulseGroup === g ? " on" : "");
     b.textContent = label;
-    b.addEventListener("click", () => { state.pulseGroup = g; route(); });
+    b.addEventListener("click", () => selectGroup(g));
+    tabBtns[g] = b;
     tabs.appendChild(b);
   }
   wrap.appendChild(tabs);
 
-  // signal tiles for the active group
-  const grid = document.createElement("div");
-  grid.className = "pulse-grid";
+  // The active group's tiles live in their own container so switching tabs
+  // repaints ONLY this block — the page keeps its scroll position instead of
+  // rebuilding from the top (which is what route() did, yanking you up).
+  const groupBox = document.createElement("div");
+  wrap.appendChild(groupBox);
   const order = pulse.order || Object.keys(n);
-  for (const key of order) {
-    const s = n[key];
-    if (!s || s.group !== state.pulseGroup) continue;
-    grid.appendChild(pulseTile(s));
+  function paintGroup() {
+    groupBox.innerHTML = "";
+    const grid = document.createElement("div");
+    grid.className = "pulse-grid";
+    for (const key of order) {
+      const s = n[key];
+      if (!s || s.group !== state.pulseGroup) continue;
+      grid.appendChild(pulseTile(s));
+    }
+    // fold Zillow national rent/value into the housing group
+    if (state.pulseGroup === "housing" && pulse.zillowNational) {
+      if (pulse.zillowNational.rent) grid.appendChild(pulseZillowTile("National Rent (Zillow)", "rent", pulse.zillowNational.rent));
+      if (pulse.zillowNational.value) grid.appendChild(pulseZillowTile("Home Value (Zillow)", "value", pulse.zillowNational.value));
+    }
+    groupBox.appendChild(grid);
+    // the Rates page is the deep tool for the curve; link to it from the rates group
+    if (state.pulseGroup === "rates") {
+      const see = document.createElement("a");
+      see.className = "pulse-seelink";
+      see.href = "#/rates";
+      see.innerHTML = "See the full Treasury curve, forwards &amp; SOFR &rarr;";
+      groupBox.appendChild(see);
+    }
   }
-  // fold Zillow national rent/value into the housing group
-  if (state.pulseGroup === "housing" && pulse.zillowNational) {
-    if (pulse.zillowNational.rent) grid.appendChild(pulseZillowTile("National Rent (Zillow)", "rent", pulse.zillowNational.rent));
-    if (pulse.zillowNational.value) grid.appendChild(pulseZillowTile("Home Value (Zillow)", "value", pulse.zillowNational.value));
+  function selectGroup(g) {
+    if (state.pulseGroup === g) return;
+    state.pulseGroup = g;
+    for (const [k, btn] of Object.entries(tabBtns)) btn.classList.toggle("on", k === g);
+    paintGroup();
   }
-  wrap.appendChild(grid);
-
-  // the Rates page is the deep tool for the curve; link to it from here
-  if (state.pulseGroup === "rates") {
-    const see = document.createElement("a");
-    see.className = "pulse-seelink";
-    see.href = "#/rates";
-    see.innerHTML = "See the full Treasury curve, forwards &amp; SOFR &rarr;";
-    wrap.appendChild(see);
-  }
+  paintGroup();
 
   // by-market board → each flows into a full Market page
   wrap.appendChild(subHead("By market", "Home prices, rents and values across the metros the briefing covers"));
@@ -6159,11 +6175,11 @@ function todayISO() {
 async function renderThreads() {
   const wrap = $("threads-content");
   wrap.innerHTML = "";
-  wrap.appendChild(pageHead("Story Arcs",
+  wrap.appendChild(pageHead("Threads",
     "Running storylines the briefing is tracking. Each links stories by a concrete shared spine — the same property, deal, lawsuit, or company event — never a vague theme."));
   const threads = await getThreads();
   if (!threads.length) {
-    wrap.appendChild(emptyPanel("No arcs yet",
+    wrap.appendChild(emptyPanel("No threads yet",
       "When two or more stories share a concrete anchor — the same building, deal, case, or company event — they connect into a timeline here."));
     return;
   }
@@ -6533,15 +6549,18 @@ function fmtMetric(v, unit) {
 }
 
 function metricCard(m) {
+  const isNational = !m.geography || m.geography === "National";
   const card = document.createElement("div");
-  card.className = "metric-card";
+  // national vs market-specific prints are color-coded so the two never blur
+  // together — a national index and a Manhattan-only figure read very differently
+  card.className = "metric-card " + (isNational ? "mc-national" : "mc-regional");
   const series = [...(m.series || [])].sort((a, b) => (a.asOf || "").localeCompare(b.asOf || ""));
   const last = series[series.length - 1];
 
   // geography chip up top — makes explicit whether it's a national series or a
   // market-specific print, so a metric never masquerades as market-agnostic
   const geo = document.createElement("div");
-  geo.className = "metric-geo";
+  geo.className = "metric-geo " + (isNational ? "geo-national" : "geo-regional");
   geo.textContent = m.geography || "National";
   card.appendChild(geo);
 
