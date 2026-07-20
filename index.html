@@ -8,13 +8,13 @@
   <title>Real Estate Briefing</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🗞️</text></svg>">
   <!-- installable PWA: manifest + iOS home-screen chrome; sw.js caches the app shell for offline -->
-  <link rel="manifest" href="manifest.webmanifest?v=38">
+  <link rel="manifest" href="manifest.webmanifest?v=40">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="Briefing">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
   <!-- bump ?v= on every deploy so cached pages can never pair old code with new data -->
-  <link rel="stylesheet" href="css/style.css?v=38">
+  <link rel="stylesheet" href="css/style.css?v=40">
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" defer></script>
 </head>
 <body>
@@ -32,6 +32,13 @@
           <a id="current-date" href="#/history" aria-label="View briefing history"></a>
           <button id="next-day" class="nav-arrow" aria-label="Next day">›</button>
         </nav>
+        <button id="bell-btn" class="icon-btn bell-btn" aria-label="Alerts" title="Alerts">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M18 9a6 6 0 1 0-12 0c0 6-2 7-2 7h16s-2-1-2-7"></path>
+            <path d="M10.3 20a2 2 0 0 0 3.4 0"></path>
+          </svg>
+          <span id="bell-dot" class="bell-dot" hidden></span>
+        </button>
         <button id="search-btn" class="icon-btn" aria-label="Search" title="Search">
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <circle cx="11" cy="11" r="7"></circle>
@@ -134,6 +141,11 @@
     <section id="view-status" class="view" hidden>
       <div id="status-content"></div>
     </section>
+
+    <!-- Alerts (masthead bell): push notifications + following -->
+    <section id="view-alerts" class="view" hidden>
+      <div id="alerts-content"></div>
+    </section>
   </main>
 
   <!-- Reader overlay -->
@@ -188,18 +200,19 @@
     <img id="sharebox-img" alt="Story card">
     <p class="sharebox-hint">Touch and hold the card to share or save it</p>
     <div class="sharebox-actions">
-      <button id="sharebox-share" class="sharebox-btn">Share…</button>
-      <button id="sharebox-link" class="sharebox-btn quiet">Copy article link</button>
+      <button id="sharebox-copy" class="sharebox-btn">Copy card</button>
+      <button id="sharebox-share" class="sharebox-btn quiet">Share…</button>
+      <button id="sharebox-link" class="sharebox-btn quiet">Copy link</button>
     </div>
   </div>
 
   <div id="toast" role="status"></div>
 
-  <script src="js/app.js?v=38"></script>
+  <script src="js/app.js?v=40"></script>
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', function () {
-        navigator.serviceWorker.register('sw.js?v=38').catch(function () {});
+        navigator.serviceWorker.register('sw.js?v=40').catch(function () {});
       });
     }
   </script>

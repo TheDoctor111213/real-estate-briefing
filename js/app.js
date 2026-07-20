@@ -123,6 +123,9 @@ async function init() {
   });
 
   $("search-btn").addEventListener("click", () => { location.hash = "/search"; });
+  $("bell-btn").addEventListener("click", () => { location.hash = "/alerts"; });
+  paintBellDot();
+  try { navigator.clearAppBadge?.(); } catch { /* unsupported */ }
   // the monogram locks the app back to the picker; re-entering any
   // passcoded profile (including your own) asks for its code
   $("profile-btn").addEventListener("click", () => {
@@ -132,7 +135,11 @@ async function init() {
   });
 
   document.addEventListener("visibilitychange", () => {
-    if (!document.hidden) refreshData(true);
+    if (!document.hidden) {
+      refreshData(true);
+      paintBellDot();
+      try { navigator.clearAppBadge?.(); } catch { /* unsupported */ }
+    }
   });
   setInterval(() => { if (!document.hidden) refreshData(true); }, 10 * 60 * 1000);
   loadRates();
@@ -188,6 +195,19 @@ async function init() {
   });
   $("sharebox-close").addEventListener("click", hideShareBox);
   $("sharebox").addEventListener("click", (e) => { if (e.target === $("sharebox")) hideShareBox(); });
+  // copy the IMAGE itself to the clipboard — pasting in Messages inserts the
+  // picture, no share sheet involved (the reliable iOS path)
+  $("sharebox-copy").addEventListener("click", async () => {
+    if (!shareBoxState) return;
+    try {
+      await navigator.clipboard.write([
+        new ClipboardItem({ "image/png": Promise.resolve(shareBoxState.blob) }),
+      ]);
+      flashToast("Card copied — paste it in Messages");
+    } catch {
+      flashToast("Couldn't copy — touch and hold the card instead");
+    }
+  });
   // fresh tap = fresh user activation, so these calls are allowed to run
   $("sharebox-share").addEventListener("click", async () => {
     if (!shareBoxState) return;
@@ -431,6 +451,9 @@ function route() {
   } else if (h === "#/status") {
     showView("status");
     renderStatus();
+  } else if (h === "#/alerts") {
+    showView("alerts");
+    renderAlerts();
   } else if (h === "#/trends") {
     showView("trends");
     renderTrends();
@@ -1993,7 +2016,7 @@ async function renderPlayerProfile(slug) {
   roleLine.textContent = p.role || (p.type === "person" ? "Person" : "Company");
   linkifyElement(roleLine, p.slug);
   id.append(name, roleLine);
-  head.append(playerAvatar(p, true), id);
+  head.append(playerAvatar(p, true), id, watchStar(p.slug, p.name));
   wrap.appendChild(head);
 
   // person → firm cross-link when the firm has its own profile
@@ -3187,6 +3210,7 @@ async function openPlayerSheet(slug) {
     rl.textContent = p.role || (p.type === "company" ? "Company" : "");
     ht.append(nm, rl);
     head.appendChild(ht);
+    head.appendChild(watchStar(slug, p.name));
     const arrow = document.createElement("span");
     arrow.className = "sheet-arrow";
     arrow.textContent = "›";
@@ -4412,6 +4436,287 @@ async function renderStatus() {
   const rAge = ageMin(ratesAt);
   statusRow(sysCard, "Rates cache", fmtAge(rAge), rAge > 120 ? "warn" : "ok");
   wrap.appendChild(sysCard);
+}
+
+/* ---------- alerts: web push + following (Phase 4) ----------
+   Server side: push-send / push-dispatch edge functions + pg_cron. This side:
+   subscribe the device, keep per-profile toggles and the watchlist in prefs,
+   read the device-local inbox the service worker writes. */
+
+const ALERTS_SEEN_KEY = "briefing_alerts_seen";
+
+function pushSupported() {
+  return "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+}
+
+function urlB64ToUint8Array(s) {
+  const pad = "=".repeat((4 - (s.length % 4)) % 4);
+  const b64 = (s + pad).replace(/-/g, "+").replace(/_/g, "/");
+  const raw = atob(b64);
+  return Uint8Array.from(raw, (c) => c.charCodeAt(0));
+}
+
+async function vapidPublicKey() {
+  try {
+    const rows = await sb("secrets?id=eq.vapid&select=data");
+    if (rows[0]?.data?.publicKeyB64) return rows[0].data.publicKeyB64;
+  } catch { /* fall through to setup */ }
+  try {
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/push-send?setup=1`, {
+      headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` },
+    });
+    return (await res.json()).publicKeyB64 || null;
+  } catch { return null; }
+}
+
+async function currentPushSub() {
+  if (!pushSupported()) return null;
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    return await reg.pushManager.getSubscription();
+  } catch { return null; }
+}
+
+async function savePushSub(subJson, disabled) {
+  await fetch(`${SUPABASE_URL}/rest/v1/push_subs`, {
+    method: "POST",
+    headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`,
+               "Content-Type": "application/json", Prefer: "resolution=merge-duplicates" },
+    body: JSON.stringify({
+      id: subJson.endpoint,
+      profile: profile.slug,
+      sub: disabled ? { ...subJson, disabled: true } : subJson,
+    }),
+  });
+}
+
+async function enableAlerts() {
+  if (profile.guest) { flashToast("Guest can't get alerts — pick a reader"); return false; }
+  if (!pushSupported()) { flashToast("Add the app to your Home Screen first"); return false; }
+  let perm = Notification.permission;
+  if (perm !== "granted") perm = await Notification.requestPermission();
+  if (perm !== "granted") { flashToast("Notifications are blocked — allow them in Settings"); return false; }
+  const key = await vapidPublicKey();
+  if (!key) { flashToast("Couldn't reach the alert server"); return false; }
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    let sub = await reg.pushManager.getSubscription();
+    if (!sub) {
+      sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlB64ToUint8Array(key),
+      });
+    }
+    await savePushSub(sub.toJSON(), false);
+    flashToast(`Alerts on for ${profile.name}`);
+    return true;
+  } catch {
+    flashToast("Couldn't subscribe this device");
+    return false;
+  }
+}
+
+async function disableAlerts() {
+  const sub = await currentPushSub();
+  if (sub) {
+    try { await savePushSub(sub.toJSON(), true); } catch { /* row stays; sender skips disabled */ }
+    try { await sub.unsubscribe(); } catch { /* ignore */ }
+  }
+  flashToast("Alerts off on this device");
+}
+
+/* following — watched players live in the profile's prefs */
+function watchedPlayers() { return pref("watchPlayers", []); }
+function isWatched(slug) { return watchedPlayers().includes(slug); }
+function toggleWatch(slug) {
+  const list = [...watchedPlayers()];
+  const i = list.indexOf(slug);
+  if (i >= 0) list.splice(i, 1);
+  else list.push(slug);
+  setPref("watchPlayers", list);
+  return i < 0;
+}
+
+function watchStar(slug, name) {
+  const el = document.createElement("span");
+  el.className = "watch-star" + (isWatched(slug) ? " on" : "");
+  el.setAttribute("role", "button");
+  el.setAttribute("aria-label", "Follow");
+  el.textContent = isWatched(slug) ? "★" : "☆";
+  el.addEventListener("click", (e) => {
+    e.stopPropagation();
+    e.preventDefault();
+    const now = toggleWatch(slug);
+    el.classList.toggle("on", now);
+    el.textContent = now ? "★" : "☆";
+    flashToast(now ? `Following ${name} — you'll be alerted when they appear` : `Unfollowed ${name}`);
+  });
+  return el;
+}
+
+/* the device-local inbox the service worker fills on each push */
+function readAlertsInbox() {
+  return new Promise((resolve) => {
+    try {
+      const open = indexedDB.open("briefing-alerts", 1);
+      open.onupgradeneeded = () => open.result.createObjectStore("inbox", { keyPath: "at" });
+      open.onsuccess = () => {
+        try {
+          const tx = open.result.transaction("inbox", "readonly");
+          const r = tx.objectStore("inbox").getAll();
+          r.onsuccess = () => resolve((r.result || []).sort((a, b) => b.at.localeCompare(a.at)));
+          r.onerror = () => resolve([]);
+        } catch { resolve([]); }
+      };
+      open.onerror = () => resolve([]);
+    } catch { resolve([]); }
+  });
+}
+
+async function paintBellDot() {
+  const dot = $("bell-dot");
+  if (!dot) return;
+  const inbox = await readAlertsInbox();
+  let seen = "";
+  try { seen = localStorage.getItem(ALERTS_SEEN_KEY) || ""; } catch { /* ignore */ }
+  dot.hidden = !(inbox[0] && inbox[0].at > seen);
+}
+
+function alertToggleRow(card, label, sub, value, onChange) {
+  const row = document.createElement("div");
+  row.className = "alert-toggle";
+  const text = document.createElement("span");
+  text.className = "at-text";
+  const l = document.createElement("span");
+  l.className = "at-label";
+  l.textContent = label;
+  text.appendChild(l);
+  if (sub) {
+    const s = document.createElement("span");
+    s.className = "at-sub";
+    s.textContent = sub;
+    text.appendChild(s);
+  }
+  const sw = document.createElement("button");
+  sw.className = "at-switch" + (value ? " on" : "");
+  sw.setAttribute("role", "switch");
+  sw.setAttribute("aria-checked", String(value));
+  sw.addEventListener("click", () => {
+    const now = !sw.classList.contains("on");
+    sw.classList.toggle("on", now);
+    sw.setAttribute("aria-checked", String(now));
+    onChange(now);
+  });
+  row.append(text, sw);
+  card.appendChild(row);
+}
+
+async function renderAlerts() {
+  const wrap = $("alerts-content");
+  wrap.innerHTML = "";
+
+  const head = document.createElement("div");
+  head.className = "status-head";
+  head.innerHTML = `<h2>Alerts</h2><p>Lock-screen notifications from your briefing — only for what you choose. Quiet overnight (9 PM–7 AM).</p>`;
+  wrap.appendChild(head);
+
+  // this device
+  const devCard = statusCard("This device");
+  const sub = await currentPushSub();
+  statusRow(devCard, "Notifications", sub ? "on" : "off", sub ? "ok" : "quiet");
+  const devBtn = document.createElement("button");
+  devBtn.className = "profile-go alert-enable";
+  devBtn.textContent = sub ? "Turn off on this device" : "Enable alerts on this device";
+  devBtn.addEventListener("click", async () => {
+    devBtn.disabled = true;
+    if (sub) await disableAlerts();
+    else await enableAlerts();
+    renderAlerts();
+  });
+  devCard.appendChild(devBtn);
+  if (!pushSupported()) {
+    const note = document.createElement("p");
+    note.className = "status-note";
+    note.textContent = "Alerts need the app installed on your Home Screen (iOS 16.4+): Share → Add to Home Screen.";
+    devCard.appendChild(note);
+  }
+  wrap.appendChild(devCard);
+
+  // what gets sent (per reader profile, synced across devices)
+  const n = pref("notifications", {});
+  const sendCard = statusCard(`What ${profile.guest ? "guests" : profile.name} gets`);
+  alertToggleRow(sendCard, "Breaking news", "special-edition stories, as they publish",
+    n.breaking !== false, (v) => setPref("notifications", { ...pref("notifications", {}), breaking: v }));
+  alertToggleRow(sendCard, "People I follow", "a watched player appears in the briefing",
+    n.watch !== false, (v) => setPref("notifications", { ...pref("notifications", {}), watch: v }));
+  alertToggleRow(sendCard, "Morning: briefing is ready", "one push when the first edition lands",
+    n.ready === true, (v) => setPref("notifications", { ...pref("notifications", {}), ready: v }));
+  const evNote = document.createElement("p");
+  evNote.className = "status-note";
+  evNote.textContent = "Starred calendar events remind you the morning they happen — starring is the opt-in.";
+  sendCard.appendChild(evNote);
+  wrap.appendChild(sendCard);
+
+  // following
+  const folCard = statusCard("Following");
+  const watched = watchedPlayers();
+  if (watched.length) {
+    const players = await getPlayers();
+    const list = document.createElement("div");
+    list.className = "follow-list";
+    for (const slug of watched) {
+      const p = players.get(slug);
+      const chipEl = document.createElement("button");
+      chipEl.className = "follow-chip";
+      const nm = document.createElement("span");
+      nm.textContent = p?.name || slug;
+      nm.addEventListener("click", () => { location.hash = `/player/${slug}`; });
+      const x = document.createElement("span");
+      x.className = "follow-x";
+      x.textContent = "✕";
+      x.addEventListener("click", (e) => { e.stopPropagation(); toggleWatch(slug); renderAlerts(); });
+      chipEl.append(nm, x);
+      list.appendChild(chipEl);
+    }
+    folCard.appendChild(list);
+  } else {
+    const empty = document.createElement("p");
+    empty.className = "status-note";
+    empty.textContent = "Star ☆ a player on their profile (or their pop-up card) to follow them — you'll be alerted whenever they appear in coverage.";
+    folCard.appendChild(empty);
+  }
+  wrap.appendChild(folCard);
+
+  // recent alerts (this device)
+  const inCard = statusCard("Recent alerts");
+  const inbox = await readAlertsInbox();
+  if (inbox.length) {
+    for (const entry of inbox.slice(0, 15)) {
+      const row = document.createElement("button");
+      row.className = "sheet-mention";
+      const d = document.createElement("span");
+      d.className = "sm-date";
+      d.textContent = new Date(entry.at).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+      const t = document.createElement("span");
+      t.className = "sm-title";
+      t.textContent = entry.title + (entry.body ? ` — ${entry.body}` : "");
+      row.append(d, t);
+      row.addEventListener("click", () => {
+        const h = (entry.url || "").split("#")[1];
+        if (h) location.hash = h;
+      });
+      inCard.appendChild(row);
+    }
+  } else {
+    const empty = document.createElement("p");
+    empty.className = "status-note";
+    empty.textContent = "Notifications you receive on this device collect here.";
+    inCard.appendChild(empty);
+  }
+  wrap.appendChild(inCard);
+
+  try { if (inbox[0]) localStorage.setItem(ALERTS_SEEN_KEY, inbox[0].at); } catch { /* ignore */ }
+  paintBellDot();
 }
 
 /* ---------- boot ---------- */

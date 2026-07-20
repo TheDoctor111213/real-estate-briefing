@@ -2026,3 +2026,110 @@ button.heat-cell:active { outline: 1.5px solid var(--ink); }
   font-size: 15px;
   -webkit-tap-highlight-color: transparent;
 }
+
+/* interactive surfaces never text-select on long-press — graphs, cells,
+   buttons, chips. Article/reader prose stays selectable. */
+button,
+.chips, .chip,
+.heat, .heat-cell,
+.reader-progress,
+#rates-content,
+#map-canvas, .map-legend,
+.brief-row, .catchup, .watch-item,
+.lede-kicker, .section-head, .meta {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+/* the one deliberate exception: the share card must keep its native
+   touch-and-hold photo menu */
+.sharebox img {
+  -webkit-user-select: auto;
+  user-select: auto;
+  -webkit-touch-callout: default;
+}
+
+/* ---------- alerts (bell, toggles, following) ---------- */
+.bell-btn { position: relative; }
+.bell-dot {
+  position: absolute;
+  top: 4px;
+  right: 5px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #d23f31;
+  border: 1.5px solid var(--bg);
+}
+
+.alert-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 9px 0;
+}
+.alert-toggle + .alert-toggle { border-top: 1px solid var(--rule); }
+.at-text { display: flex; flex-direction: column; min-width: 0; }
+.at-label { font-size: 13.5px; font-weight: 600; color: var(--ink); }
+.at-sub { font-size: 11px; color: var(--ink-3); margin-top: 1px; }
+.at-switch {
+  flex: none;
+  width: 44px;
+  height: 26px;
+  border-radius: 13px;
+  background: var(--rule);
+  position: relative;
+  transition: background 0.18s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+.at-switch::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+  transition: transform 0.18s cubic-bezier(0.2, 0.8, 0.3, 1);
+}
+.at-switch.on { background: #1e8e3e; }
+.at-switch.on::after { transform: translateX(18px); }
+
+.alert-enable {
+  display: block;
+  width: 100%;
+  margin-top: 12px;
+}
+.alert-enable:disabled { opacity: 0.5; }
+
+.follow-list { display: flex; flex-wrap: wrap; gap: 8px; padding-top: 4px; }
+.follow-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ink);
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  padding: 7px 12px;
+  -webkit-tap-highlight-color: transparent;
+}
+.follow-chip:active { border-color: var(--ink-3); }
+.follow-x { color: var(--ink-3); font-size: 11px; padding: 2px 4px; }
+.follow-x:active { color: #d23f31; }
+
+.watch-star {
+  margin-left: auto;
+  flex: none;
+  font-size: 22px;
+  color: var(--ink-3);
+  padding: 6px 10px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.watch-star.on { color: #d9a010; }
+.sheet-head .watch-star { font-size: 19px; padding: 4px 6px; }
