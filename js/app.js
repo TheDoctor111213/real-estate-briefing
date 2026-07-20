@@ -4,7 +4,7 @@
    History has no tab of its own — it's reached by tapping the masthead date. It still gets a hash route.
    Data lives in Supabase (public-read); the pipeline upserts via scripts/push_data.py. */
 
-const APP_VERSION = "v43";
+const APP_VERSION = "v44";
 const SUPABASE_URL = "https://uhwdnmbxiopfysodydty.supabase.co";
 const SUPABASE_KEY = "sb_publishable_LEQ5_-jjcRRl2p0wlaiXcw_RX4Wf8-y";
 
@@ -4296,14 +4296,14 @@ function shareStoryCard(story, date) {
   const file = canvasToPngFile(c, `${story.id}.png`);
   if (!file) { flashToast("Couldn't render the card"); return; }
 
-  // Stash the link on the clipboard first so it's there to paste (iOS Messages
-  // drops the image if text/url ride along with the file, so we can't attach
-  // it to the share itself). Best-effort — never blocks the share.
-  if (link) { try { navigator.clipboard?.writeText(link); } catch { /* ignore */ } }
-
   // One tap → straight to the OS share sheet with the image (Messages, Mail,
-  // AirDrop…). Files ONLY, so Messages actually attaches the picture. Falls
-  // back to the in-app viewer on desktop / browsers without file share.
+  // AirDrop…). Files ONLY, so Messages actually attaches the picture (it drops
+  // the image if any text/url rides along).
+  //
+  // CRITICAL: do NOT touch navigator.clipboard before this call. A clipboard
+  // write consumes the transient user-activation, after which iOS rejects
+  // navigator.share() with NotAllowedError. The share IS the action; the link
+  // lives on the card viewer's "Copy link" button for when it's needed.
   if (navigator.canShare && navigator.canShare({ files: [file] })) {
     navigator.share({ files: [file] }).catch((e) => {
       if (e && e.name === "AbortError") return;      // user closed the sheet — fine
