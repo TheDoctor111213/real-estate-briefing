@@ -262,7 +262,11 @@ def extract_from_html(html: str, url: str, final_url: str | None = None) -> dict
     low = html.lower()
     if not out["ok"] and ("page not found" in low[:8000] or "error-404" in low[:8000]):
         out["notFound"] = True
-    # a short TRD result otherwise usually means the session cookie is
+    # TRD /data/ pages are TRD DATA — a separate paid product ($/yr tier), gated
+    # server-side; NO session cookie unlocks them, so don't blame the session.
+    elif is_trd and "/data/" in (final_url or url) and not out["ok"]:
+        out["premiumData"] = True
+    # a short result on a regular TRD article usually means the session cookie is
     # missing/expired — surface it so the pipeline can flag it in the day's notes
     elif is_trd and not out["ok"]:
         out["paywalled"] = True

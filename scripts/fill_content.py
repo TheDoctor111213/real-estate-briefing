@@ -173,6 +173,9 @@ def _try_story(s: dict) -> tuple[str, object]:
         return "filled", res["words"]
     if res.get("notFound"):
         return "failed", "404 at source — the story's url looks wrong (never guess urls; use the email's link)"
+    if res.get("premiumData"):
+        s["sourceBlocked"] = True  # app: clean tap-through to the (paywalled) source
+        return "premium", "TRD Data (premium tier) — no session unlocks it; left as a tap-through"
     if res.get("paywalled"):
         return "paywalled", None
     if res.get("blocked"):
@@ -216,9 +219,9 @@ def fill_day(day: dict, throttle: float = 1.5, retry_wait: float = 25) -> dict:
             elif status == "blocked":
                 unresolved[sid] = ("blocked", detail)
                 print(f"  ⛔ {sid:<40} {detail}{tag}")
-            elif status == "mismatch":
-                # deterministic (same url → same wrong article): don't retry, and
-                # leave the story a tap-through rather than showing wrong content
+            elif status in ("mismatch", "premium"):
+                # deterministic — a wrong-url pairing or a premium-tier page no
+                # session can unlock; don't retry, leave a clean tap-through
                 unresolved.pop(sid, None)
                 print(f"  ⤫ {sid:<40} {detail}")
             else:

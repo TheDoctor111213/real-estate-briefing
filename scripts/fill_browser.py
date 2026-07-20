@@ -138,6 +138,11 @@ def _fill_one_day(page, ctx, cookied: set, date: str, no_push: bool) -> tuple[in
                 s["sourceBlocked"] = True
                 failed.append((sid, "headline/article mismatch — url likely mis-paired"))
                 print(f"  ⤫ {sid:<40} headline/article mismatch")
+            elif res.get("premiumData"):
+                # TRD Data ($/yr tier) — no session unlocks it; clean tap-through
+                s["sourceBlocked"] = True
+                failed.append((sid, "TRD Data (premium tier)"))
+                print(f"  ⤫ {sid:<40} TRD Data (premium tier)")
             else:
                 s["sourceBlocked"] = True  # app: card taps through to the source
                 failed.append((sid, f"{res.get('words', 0)} words"
