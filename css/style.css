@@ -114,7 +114,9 @@ a { color: inherit; }
 .masthead {
   max-width: var(--page);
   margin: 0 auto;
-  padding: 16px var(--pad) 0;
+  /* black-translucent status bar + viewport-fit=cover draw content up behind
+     the clock / Dynamic Island — inset the top so the wordmark clears it */
+  padding: calc(16px + env(safe-area-inset-top)) var(--pad) 0;
   border-bottom: 1px solid var(--rule);
 }
 
@@ -1047,7 +1049,8 @@ main {
   align-items: center;
   max-width: var(--measure);
   margin: 0 auto;
-  padding: 9px var(--pad);
+  /* same safe-area clearance as the masthead when opened full-screen */
+  padding: calc(9px + env(safe-area-inset-top)) var(--pad) 9px;
 }
 
 #reader-back { font-size: 13px; color: var(--ink-2); padding: 6px 10px 6px 0; }
