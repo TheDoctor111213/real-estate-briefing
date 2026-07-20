@@ -2343,7 +2343,7 @@ button.cal-open:active { background: var(--rule); }
   color: var(--ink-3);
   background: none;
   border: none;
-  padding: 4px 2px;
+  padding: 6px 16px 6px 6px;
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
 }

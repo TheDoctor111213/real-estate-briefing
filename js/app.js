@@ -5,7 +5,7 @@
    History has no tab of its own — it's reached by tapping the masthead date. It still gets a hash route.
    Data lives in Supabase (public-read); the pipeline upserts via scripts/push_data.py. */
 
-const APP_VERSION = "v54";
+const APP_VERSION = "v55";
 const SUPABASE_URL = "https://uhwdnmbxiopfysodydty.supabase.co";
 const SUPABASE_KEY = "sb_publishable_LEQ5_-jjcRRl2p0wlaiXcw_RX4Wf8-y";
 
@@ -4798,7 +4798,8 @@ function renderCalendarMonth(wrap, events, storyIndex) {
     if (evs.length) {
       const dot = document.createElement("span"); dot.className = "cal-dot"; cell.appendChild(dot);
       if (!firstEventDay) firstEventDay = iso;
-      cell.addEventListener("click", () => { state.calDay = iso; renderCalendar(); });
+      // tap a day to select it; tap the already-selected (blue) day to deselect
+      cell.addEventListener("click", () => { state.calDay = (state.calDay === iso) ? null : iso; renderCalendar(); });
     }
     grid.appendChild(cell);
   }
