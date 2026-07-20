@@ -5,7 +5,7 @@
    History has no tab of its own — it's reached by tapping the masthead date. It still gets a hash route.
    Data lives in Supabase (public-read); the pipeline upserts via scripts/push_data.py. */
 
-const APP_VERSION = "v66";
+const APP_VERSION = "v67";
 const SUPABASE_URL = "https://uhwdnmbxiopfysodydty.supabase.co";
 const SUPABASE_KEY = "sb_publishable_LEQ5_-jjcRRl2p0wlaiXcw_RX4Wf8-y";
 // Mapbox public token — a pk.* token is meant to ship to browsers, but GitHub's
@@ -74,6 +74,29 @@ function fmtValue(n) {
   if (n >= 1e9) return "$" + (n / 1e9).toFixed(n % 1e9 ? 1 : 0) + "B";
   if (n >= 1e6) return "$" + (n / 1e6).toFixed(n % 1e6 >= 1e5 ? 1 : 0).replace(/\.0$/, "") + "M";
   return "$" + Math.round(n / 1e3) + "K";
+}
+
+/* Blank/placeholder images some outlets embed when a story has no photo —
+   Bisnow's watermark placeholder is the worst offender (a big empty "BISNOW"
+   tile). We never want these as a hero or inside an article body. */
+function isJunkImageUrl(src) {
+  if (!src) return true;
+  const s = src.toLowerCase();
+  if (s.startsWith("data:image") && s.length < 256) return true; // 1x1 spacers
+  return /(?:^|\/|=)(?:placeholder|blank|spacer|transparent|default-image|missing|no-image|1x1)\b/.test(s)
+    || /placeholder\.(?:png|jpe?g|gif|webp)/.test(s)
+    || /assets\/website\/placeholder/.test(s);
+}
+
+/* Sanitize stored article HTML at render time: drop any <script>, and strip
+   blank/placeholder <img>s so a bad hero or watermark tile never shows. */
+function sanitizeArticleHtml(html) {
+  return (html || "")
+    .replace(/<script[\s\S]*?<\/script>/gi, "")
+    .replace(/<img\b[^>]*>/gi, (tag) => {
+      const m = tag.match(/src\s*=\s*["']([^"']+)["']/i);
+      return m && isJunkImageUrl(m[1]) ? "" : tag;
+    });
 }
 
 /* Price-efficiency chip: $/unit when a unit count is known (multifamily), else
@@ -567,6 +590,7 @@ async function refreshData(silent, manual) {
     state.threads = null; // arcs/calendar/metrics refetch on next open
     state.events = null;
     state.metrics = null;
+    state.pulse = null;   // Market Pulse re-reads the cache on next Desk/Market open
 
     const fresh = target ? await getDay(target) : null;
     state.currentDate = target;
@@ -1341,12 +1365,6 @@ function mapTitle(dates) {
   return state.currentDate ? formatDate(state.currentDate, { weekday: "long", month: "long", day: "numeric" }) : "";
 }
 
-// pin diameter grows with deal size (sqrt → area tracks value); no value = small
-function pinSize(v) {
-  if (!v) return 22;
-  return Math.max(20, Math.min(58, 20 + Math.sqrt(v / 1e6) * 1.5));
-}
-
 function setMapMode(mode) {
   state.mapMode = mode;
   $("map-mode-day").classList.toggle("on", mode === "day");
@@ -2011,34 +2029,6 @@ function median(arr) {
 const compPsf = (s) => (s.sizeSqft ? s.valueUsd / s.sizeSqft : null);
 const compPunit = (s) => (s.units ? s.valueUsd / s.units : null);
 
-/* ---------- The Desk: collapsible sections ---------- */
-const deskOpen = {}; // section key -> user's open/closed override
-function deskSection(key, title, count, defaultOpen, build) {
-  const open = key in deskOpen ? deskOpen[key] : defaultOpen;
-  const sec = document.createElement("div");
-  sec.className = "desk-sec";
-  const head = document.createElement("button");
-  head.type = "button";
-  head.className = "desk-sec-head" + (open ? " open" : "");
-  const t = document.createElement("span"); t.className = "ds-title"; t.textContent = title;
-  head.appendChild(t);
-  if (count != null) { const c = document.createElement("span"); c.className = "ds-count"; c.textContent = count; head.appendChild(c); }
-  const chev = document.createElement("span"); chev.className = "ds-chev"; chev.textContent = "▾";
-  head.appendChild(chev);
-  const body = document.createElement("div");
-  body.className = "desk-sec-body";
-  body.hidden = !open;
-  build(body);
-  head.addEventListener("click", () => {
-    const willOpen = body.hidden;
-    body.hidden = !willOpen;
-    head.classList.toggle("open", willOpen);
-    deskOpen[key] = willOpen;
-  });
-  sec.append(head, body);
-  return sec;
-}
-
 /* ---------- Comps, delineated by market ----------
    A median across unlike deals in different cities and asset classes is noise.
    A comp only means something within one market + asset class (and, once the
@@ -2080,6 +2070,16 @@ function buildComps(body, priced) {
   body.appendChild(list);
 }
 
+// A row linking a market's board section to its unified Market page (external
+// backdrop + internal deals). The join key across the app is `market`.
+function marketBackdropLink(market) {
+  const a = document.createElement("a");
+  a.className = "cm-market-link";
+  a.href = `#/market/${encodeURIComponent(market)}`;
+  a.innerHTML = `<span>${market} market — rents, values &amp; the backdrop</span><span class="cm-ml-arrow">↗</span>`;
+  return a;
+}
+
 function compMarketRow(market, deals) {
   const psfs = deals.map(compPsf).filter((v) => v);
   const punits = deals.map(compPunit).filter((v) => v);
@@ -2094,6 +2094,7 @@ function compMarketRow(market, deals) {
   const chev = document.createElement("span"); chev.className = "cm-chev"; chev.textContent = "▾";
   head.append(name, stat, chev);
   const inner = document.createElement("div"); inner.className = "comp-market-body"; inner.hidden = true;
+  inner.appendChild(marketBackdropLink(market));
   for (const s of [...deals].sort((a, b) => (b.valueUsd || 0) - (a.valueUsd || 0))) inner.appendChild(ledgerRow(s));
   head.addEventListener("click", () => { const o = inner.hidden; inner.hidden = !o; head.classList.toggle("open", o); });
   wrap.append(head, inner);
@@ -2158,6 +2159,7 @@ function capRateMarketRow(market, obs) {
   const chev = document.createElement("span"); chev.className = "cm-chev"; chev.textContent = "▾";
   head.append(name, stat, chev);
   const inner = document.createElement("div"); inner.className = "comp-market-body"; inner.hidden = true;
+  inner.appendChild(marketBackdropLink(market));
   for (const o of [...obs].sort((a, b) => a.cap.v - b.cap.v)) inner.appendChild(capObsRow(o));
   head.addEventListener("click", () => { const o = inner.hidden; inner.hidden = !o; head.classList.toggle("open", o); });
   wrap.append(head, inner);
@@ -2424,14 +2426,13 @@ async function renderTrends() {
   wrap.appendChild(pageHead("The Desk",
     "The market's macro backdrop and every number the briefing accumulates — each board a tap away."));
 
-  const days = await getAllDays();
+  // the landing needs six independent tables — fetch them in parallel (one round
+  // trip, not six) so the Desk paints fast on first open
+  const [days, metrics, players, events, threads, pulse] = await Promise.all([
+    getAllDays(), getMetrics(), getPlayers(), getEvents(), getThreads(), getPulse(),
+  ]);
   const stories = days.flatMap((d) => (d.stories || []).map((s) => ({ ...s, _date: d.date })));
   const priced = stories.filter((s) => s.valueUsd);
-  const metrics = await getMetrics();
-  const players = await getPlayers();
-  const events = await getEvents();
-  const threads = await getThreads();
-  const pulse = await getPulse();
   const distress = stories.filter((s) => s.dealType === "Distress");
 
   const stat = {
@@ -2579,6 +2580,15 @@ function buildMarketPulse(wrap, pulse) {
     if (pulse.zillowNational.value) grid.appendChild(pulseZillowTile("Home Value (Zillow)", "value", pulse.zillowNational.value));
   }
   wrap.appendChild(grid);
+
+  // the Rates page is the deep tool for the curve; link to it from here
+  if (state.pulseGroup === "rates") {
+    const see = document.createElement("a");
+    see.className = "pulse-seelink";
+    see.href = "#/rates";
+    see.innerHTML = "See the full Treasury curve, forwards &amp; SOFR &rarr;";
+    wrap.appendChild(see);
+  }
 
   // by-market board → each flows into a full Market page
   wrap.appendChild(subHead("By market", "Home prices, rents and values across the metros the briefing covers"));
@@ -4358,7 +4368,7 @@ async function openReaderRoute(date, id) {
 
   const hero = $("reader-hero");
   const heroImg = $("reader-hero-img");
-  if (story.image) {
+  if (story.image && !isJunkImageUrl(story.image)) {
     heroImg.src = story.image;
     heroImg.alt = story.title;
     hero.hidden = false;
@@ -4369,7 +4379,7 @@ async function openReaderRoute(date, id) {
 
   const body = $("reader-body");
   if (story.content) {
-    body.innerHTML = story.content.replace(/<script[\s\S]*?<\/script>/gi, "");
+    body.innerHTML = sanitizeArticleHtml(story.content);
     const firstImg = body.querySelector("img");
     if (firstImg && story.image && firstImg.src === story.image) firstImg.remove();
   } else {
@@ -4575,12 +4585,12 @@ function showReaderVersion(story, date, idx) {
 
   // hero + explainer belong to the primary version only
   const hero = $("reader-hero");
-  if (!c && story.image) { $("reader-hero-img").src = story.image; hero.hidden = false; }
+  if (!c && story.image && !isJunkImageUrl(story.image)) { $("reader-hero-img").src = story.image; hero.hidden = false; }
   else hero.hidden = true;
   $("reader-explainer").hidden = !!c || !story.explainer;
 
   const body = $("reader-body");
-  body.innerHTML = (content || "").replace(/<script[\s\S]*?<\/script>/gi, "");
+  body.innerHTML = sanitizeArticleHtml(content);
   linkifyElement(body);
 
   const url = (c && c.url) || story.url || "#";
@@ -4685,7 +4695,7 @@ function openStoryPeek(date, id, fromY) {
   if (!story) return;
   peekTarget = isExpandable(story) ? { date, id } : null;
   openSheet((card) => {
-    if (story.image) {
+    if (story.image && !isJunkImageUrl(story.image)) {
       const fig = document.createElement("div");
       fig.className = "peek-hero";
       const img = document.createElement("img");
@@ -5950,24 +5960,6 @@ function backLink(label, hash) {
 
 function todayISO() {
   return new Date().toLocaleDateString("en-CA"); // local YYYY-MM-DD
-}
-
-/* Two big tap targets at the top of Trends — the permanent way into Calendar and
-   Story Arcs, which have no tab of their own. */
-function deskLinks() {
-  const row = document.createElement("div");
-  row.className = "desk-links";
-  for (const [icon, label, sub, hash] of [
-    ["📅", "Calendar", "Upcoming catalysts", "#/calendar"],
-    ["🧵", "Story Arcs", "Running storylines", "#/threads"],
-  ]) {
-    const a = document.createElement("a");
-    a.className = "desk-link";
-    a.href = hash;
-    a.innerHTML = `<span class="desk-icon">${icon}</span><span class="desk-text"><b>${label}</b><span>${sub}</span></span><span class="desk-arrow">›</span>`;
-    row.appendChild(a);
-  }
-  return row;
 }
 
 /* --- Story threads (arcs) --- */

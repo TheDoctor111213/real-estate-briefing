@@ -162,6 +162,11 @@ def _try_story(s: dict) -> tuple[str, object]:
     if final and _is_wrapper(s["url"]) and not _is_wrapper(final):
         s["url"] = _clean_url(final)
     if res.get("ok") and _words(res.get("html")) > have:
+        # guard against a mis-paired link: if the headline shares no distinctive
+        # name with the fetched article, the url pointed at the wrong story —
+        # don't attach that content under this headline
+        if fetch_article.title_mismatch(s.get("title", ""), res):
+            return "mismatch", "fetched article doesn't match the headline — url likely mis-paired (leaving as a tap-through)"
         s["content"] = res["html"]
         if not s.get("image") and res.get("image"):
             s["image"] = res["image"]
@@ -211,6 +216,11 @@ def fill_day(day: dict, throttle: float = 1.5, retry_wait: float = 25) -> dict:
             elif status == "blocked":
                 unresolved[sid] = ("blocked", detail)
                 print(f"  ⛔ {sid:<40} {detail}{tag}")
+            elif status == "mismatch":
+                # deterministic (same url → same wrong article): don't retry, and
+                # leave the story a tap-through rather than showing wrong content
+                unresolved.pop(sid, None)
+                print(f"  ⤫ {sid:<40} {detail}")
             else:
                 unresolved[sid] = ("failed", detail)
                 print(f"  ✗ {sid:<40} {detail}{tag}")

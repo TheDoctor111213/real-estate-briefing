@@ -8,13 +8,13 @@
   <title>Real Estate Briefing</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🗞️</text></svg>">
   <!-- installable PWA: manifest + iOS home-screen chrome; sw.js caches the app shell for offline -->
-  <link rel="manifest" href="manifest.webmanifest?v=66">
+  <link rel="manifest" href="manifest.webmanifest?v=67">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="Briefing">
   <link rel="stylesheet" href="https://api.mapbox.com/mapbox-gl-js/v3.9.0/mapbox-gl.css">
   <!-- bump ?v= on every deploy so cached pages can never pair old code with new data -->
-  <link rel="stylesheet" href="css/style.css?v=66">
+  <link rel="stylesheet" href="css/style.css?v=67">
   <script src="https://api.mapbox.com/mapbox-gl-js/v3.9.0/mapbox-gl.js" defer></script>
 </head>
 <body>
@@ -102,7 +102,7 @@
       <div id="map-legend" class="map-legend"></div>
       <div id="map-canvas"></div>
       <div id="map-playback" class="map-playback" hidden></div>
-      <p class="map-hint">Pins scale with deal size. Tap a pin to preview; tap the headline to read. Tap a legend chip to isolate a type; in All time, press play to watch deals accumulate.</p>
+      <p class="map-hint">Bubbles scale with deal size — tap one to preview, tap its headline to read. Tap a glowing market to open its backdrop. Tap a legend chip to isolate a type; in All time, press play to watch capital accumulate.</p>
     </section>
 
     <!-- Trends -->
@@ -230,7 +230,7 @@
 
   <div id="toast" role="status"></div>
 
-  <script src="js/app.js?v=66"></script>
+  <script src="js/app.js?v=67"></script>
   <script>
     if ('serviceWorker' in navigator) {
       // Auto-update: reload once the instant a new service worker takes control,
@@ -247,7 +247,7 @@
         });
       }
       window.addEventListener('load', function () {
-        navigator.serviceWorker.register('sw.js?v=66').then(function (reg) {
+        navigator.serviceWorker.register('sw.js?v=67').then(function (reg) {
           reg.update(); // check for a newer version right now…
           document.addEventListener('visibilitychange', function () {
             // …and every time the app is reopened or refocused

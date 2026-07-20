@@ -49,6 +49,10 @@ KEEP = {"p", "h2", "h3", "blockquote", "ul", "ol", "li", "img", "figure", "figca
 DROP_SUBTREES = {"script", "style", "noscript", "iframe", "form", "aside", "nav", "footer", "header", "svg", "button"}
 # class/id fragments that mark non-article chrome
 JUNK = re.compile(r"related|share|social|newsletter|promo|ad-|advert|subscribe|paywall|comment|footer|nav|menu|sidebar|recirc|trending|signup|modal|byline-block", re.I)
+# blank/placeholder image srcs some outlets emit when a story has no photo —
+# Bisnow's watermark tile (assets/website/placeholder.png) is the worst offender.
+# We never want these in the article body or as a hero.
+JUNK_IMG = re.compile(r"placeholder|/blank[._-]|spacer|transparent\.(?:png|gif)|/1x1[._]|/assets/website/placeholder|/default[-_]?(?:image|thumb)", re.I)
 
 
 VOID = {"img", "br", "hr", "meta", "input", "source", "link", "area", "base",
@@ -96,7 +100,7 @@ class ArticleExtractor(HTMLParser):
         elif emit and tag == "img":
             src = a.get("src") or a.get("data-src") or ""
             m = re.search(r"-(\d+)x(\d+)\.(?:jpe?g|png|webp|gif)$", src)  # skip small WP thumbs
-            if not (m and int(m.group(1)) < 400) and src.startswith("http"):
+            if not (m and int(m.group(1)) < 400) and src.startswith("http") and not JUNK_IMG.search(src):
                 alt = (a.get("alt") or "").replace('"', "&quot;")
                 self.out.append(f'<img src="{src}" alt="{alt}">')
         elif emit and (tag in DROP_SUBTREES or
@@ -248,7 +252,7 @@ def extract_from_html(html: str, url: str, final_url: str | None = None) -> dict
     out = {
         "ok": words > 120,
         "title": p.title,
-        "image": p.og_image,
+        "image": None if (p.og_image and JUNK_IMG.search(p.og_image)) else p.og_image,
         "html": body.strip(),
         "words": words,
         "finalUrl": final_url,  # after redirects — the real publisher's page
@@ -272,6 +276,49 @@ def extract_from_html(html: str, url: str, final_url: str | None = None) -> dict
 def extract(url: str) -> dict:
     html, final_url = _get_html(url)
     return extract_from_html(html, url, final_url)
+
+
+# Common title words that aren't distinctive subjects — English function words,
+# calendar terms, and generic real-estate nouns. A capitalized token NOT in here
+# is treated as a proper-noun-like subject (a company, person, or place).
+_TITLE_STOP = {
+    "the", "a", "an", "and", "or", "but", "nor", "for", "so", "yet", "of", "to", "in", "on",
+    "at", "by", "with", "from", "as", "into", "over", "under", "after", "before", "amid",
+    "its", "his", "her", "their", "this", "that", "these", "those", "up", "out", "off", "than",
+    "more", "less", "most", "new", "old", "first", "second", "third", "one", "two", "three", "four",
+    "office", "offices", "building", "buildings", "jobs", "deal", "deals", "sale", "sales", "sells",
+    "sold", "buys", "buy", "firm", "firms", "group", "real", "estate", "city", "tower", "towers",
+    "project", "projects", "report", "market", "markets", "fund", "funds", "capital", "partners",
+    "properties", "property", "development", "developer", "loan", "loans", "refi", "financing",
+    "lease", "leases", "court", "plan", "plans", "million", "billion", "home", "homes", "housing",
+    "apartment", "apartments", "hotel", "retail", "industrial", "north", "south", "east", "west",
+    "cuts", "scores", "adds", "opens", "closes", "eyes", "lands", "wins", "faces", "seeks",
+    "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
+    "january", "february", "march", "april", "may", "june", "july", "august", "september",
+    "october", "november", "december",
+}
+
+
+def _proper_tokens(title: str) -> list[str]:
+    out = []
+    for t in re.findall(r"[A-Za-z][A-Za-z.&'-]{2,}", title or ""):
+        if t[0].isupper() and t.lower() not in _TITLE_STOP:
+            out.append(t.lower().strip(".&'-"))
+    return out
+
+
+def title_mismatch(story_title: str, res: dict) -> bool:
+    """True when a story's headline shares NO distinctive proper noun with the
+    article that was actually fetched — a strong sign the url pointed at the
+    wrong article (e.g. a newsletter link mis-paired to a headline). Conservative
+    by design: it needs 2+ distinctive tokens in the headline and zero of them
+    present in the fetched title/body, so a merely-rewritten headline is never
+    falsely rejected."""
+    toks = _proper_tokens(story_title)
+    if len(toks) < 2:
+        return False
+    hay = ((res.get("title") or "") + " " + re.sub(r"<[^>]+>", " ", res.get("html") or "")).lower()
+    return not any(re.search(r"\b" + re.escape(t) + r"\b", hay) for t in toks)
 
 
 if __name__ == "__main__":

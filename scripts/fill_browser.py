@@ -124,13 +124,20 @@ def main() -> int:
                 if final and fill_content._is_wrapper(s["url"]) and not fill_content._is_wrapper(final):
                     s["url"] = fill_content._clean_url(final)
                     changed_urls += 1
-                if res.get("ok") and res["words"] > fill_content._words(s.get("content")):
+                if res.get("ok") and res["words"] > fill_content._words(s.get("content")) \
+                        and not fetch_article.title_mismatch(s.get("title", ""), res):
                     s["content"] = res["html"]
                     if not s.get("image") and res.get("image"):
                         s["image"] = res["image"]
                     s.pop("sourceBlocked", None)
                     filled.append(sid)
                     print(f"  ✓ {sid:<40} {res['words']} words")
+                elif res.get("ok") and fetch_article.title_mismatch(s.get("title", ""), res):
+                    # url pointed at the wrong article — leave a tap-through, don't
+                    # show mismatched content under this headline
+                    s["sourceBlocked"] = True
+                    failed.append((sid, "headline/article mismatch — url likely mis-paired"))
+                    print(f"  ⤫ {sid:<40} headline/article mismatch")
                 else:
                     s["sourceBlocked"] = True  # app: card taps through to the source
                     failed.append((sid, f"{res.get('words', 0)} words"
