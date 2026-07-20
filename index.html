@@ -8,13 +8,13 @@
   <title>Real Estate Briefing</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🗞️</text></svg>">
   <!-- installable PWA: manifest + iOS home-screen chrome; sw.js caches the app shell for offline -->
-  <link rel="manifest" href="manifest.webmanifest?v=45">
+  <link rel="manifest" href="manifest.webmanifest?v=46">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="Briefing">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
   <!-- bump ?v= on every deploy so cached pages can never pair old code with new data -->
-  <link rel="stylesheet" href="css/style.css?v=45">
+  <link rel="stylesheet" href="css/style.css?v=46">
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" defer></script>
 </head>
 <body>
@@ -25,7 +25,7 @@
 
   <header class="masthead">
     <div class="masthead-row">
-      <a class="wordmark" href="#/">Real Estate&nbsp;Briefing</a>
+      <a class="wordmark" href="#/"><span class="wm-full">Real Estate&nbsp;Briefing</span><span class="wm-short">RE&nbsp;Briefing</span></a>
       <div class="masthead-right">
         <nav class="date-nav" id="date-nav" aria-label="Change day">
           <button id="prev-day" class="nav-arrow" aria-label="Previous day">‹</button>
@@ -198,7 +198,7 @@
   <div id="sharebox" class="sharebox" hidden>
     <button id="sharebox-close" class="sharebox-close" aria-label="Close">✕</button>
     <img id="sharebox-img" alt="Story card">
-    <p class="sharebox-hint">Touch and hold the card to share or save it</p>
+    <p class="sharebox-hint">Touch and hold the card, then tap <b>Share</b> to drop it into Messages</p>
     <div class="sharebox-actions">
       <button id="sharebox-copy" class="sharebox-btn">Copy card</button>
       <button id="sharebox-share" class="sharebox-btn quiet">Share…</button>
@@ -208,11 +208,11 @@
 
   <div id="toast" role="status"></div>
 
-  <script src="js/app.js?v=45"></script>
+  <script src="js/app.js?v=46"></script>
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', function () {
-        navigator.serviceWorker.register('sw.js?v=45').catch(function () {});
+        navigator.serviceWorker.register('sw.js?v=46').catch(function () {});
       });
     }
   </script>

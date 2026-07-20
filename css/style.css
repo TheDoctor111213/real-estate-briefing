@@ -139,6 +139,10 @@ a { color: inherit; }
   user-select: none;
   transition: opacity 0.15s ease;
 }
+/* narrow phones can't fit "Real Estate Briefing" + the date scrubber + 3 icons;
+   swap to "RE Briefing" so the whole masthead row stays on-screen (see the
+   phone breakpoint below, which also tightens the date arrows) */
+.wm-short { display: none; }
 
 .masthead-controls {
   display: flex;
@@ -261,9 +265,21 @@ a { color: inherit; }
 }
 #current-date:hover { color: var(--accent); background: var(--rule); }
 
-.nav-arrow { font-size: 18px; line-height: 1; color: var(--ink-2); padding: 8px 10px; margin: -6px 0; }
+.nav-arrow { font-size: 18px; line-height: 1; color: var(--ink-2); padding: 8px 8px; margin: -6px 0; }
 .nav-arrow:hover:not(:disabled) { color: var(--accent); }
 .nav-arrow:disabled { opacity: 0.25; cursor: default; }
+
+/* Phones: shorten the wordmark and pull the ‹ › arrows in tight to the date so
+   the wordmark, date scrubber, bell, search and avatar all fit the width
+   (the avatar was clipping off the right edge otherwise). */
+@media (max-width: 480px) {
+  .wm-full { display: none; }
+  .wm-short { display: inline; }
+  #current-date { min-width: 62px; padding: 2px 2px; }
+  .nav-arrow { padding: 8px 3px; }
+  .masthead-right { gap: 2px; }
+  .masthead-row { gap: 8px; }
+}
 
 /* ---------- Tabs ---------- */
 .tabs {

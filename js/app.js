@@ -4,7 +4,7 @@
    History has no tab of its own — it's reached by tapping the masthead date. It still gets a hash route.
    Data lives in Supabase (public-read); the pipeline upserts via scripts/push_data.py. */
 
-const APP_VERSION = "v45";
+const APP_VERSION = "v46";
 const SUPABASE_URL = "https://uhwdnmbxiopfysodydty.supabase.co";
 const SUPABASE_KEY = "sb_publishable_LEQ5_-jjcRRl2p0wlaiXcw_RX4Wf8-y";
 
@@ -4293,27 +4293,12 @@ function shareStoryCard(story, date) {
   // Build the PNG SYNCHRONOUSLY (toDataURL, not the async toBlob). Awaiting a
   // blob here would drop the user-activation and iOS would silently block the
   // share — the whole point is to stay inside the live tap gesture.
-  // One tap → straight to the OS share sheet with the image (Messages, Mail,
-  // AirDrop…). Files ONLY, so Messages attaches the picture (it drops the image
-  // if any text/url rides along). Hand it a JPEG, not a PNG: iOS Messages shows
-  // a shared PNG in the sheet but silently drops it when compose opens, whereas
-  // it keeps a JPEG (the card has no transparency to lose).
-  //
-  // CRITICAL: do NOT touch navigator.clipboard before this call. A clipboard
-  // write consumes the transient user-activation, after which iOS rejects
-  // navigator.share() with NotAllowedError. The share IS the action; the link
-  // lives on the card viewer's "Copy link" button for when it's needed.
-  const jpg = canvasToFile(c, "image/jpeg", "briefing-card.jpg", 0.92);
-  if (jpg && navigator.canShare && navigator.canShare({ files: [jpg] })) {
-    navigator.share({ files: [jpg] }).catch((e) => {
-      if (e && e.name === "AbortError") return;      // user closed the sheet — fine
-      const png = canvasToFile(c, "image/png", `${story.id}.png`) || jpg;
-      showShareBox(png, `${story.id}.png`, link);     // real failure → the viewer
-    });
-    return;
-  }
-  // No native file share (desktop / unsupported): the viewer is the path. Use a
-  // crisp PNG there for on-screen display and clipboard copy.
+  // We deliberately do NOT hand the file to navigator.share: iOS Messages shows
+  // a web-SHARED image in the share sheet but silently drops it when the compose
+  // window opens — true for PNG *and* JPEG, an Apple bug no page can override.
+  // The reliable path is to show the card as a REAL <img> and let the user
+  // touch-and-hold it: iOS treats a long-pressed image as genuine media, so its
+  // Share → Messages always attaches. PNG for a crisp card + clipboard copy.
   const png = canvasToFile(c, "image/png", `${story.id}.png`);
   if (!png) { flashToast("Couldn't render the card"); return; }
   showShareBox(png, `${story.id}.png`, link);
