@@ -468,6 +468,14 @@ main {
   font-variant-numeric: tabular-nums;
 }
 
+.chip-arc {
+  cursor: pointer;
+  color: var(--accent);
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+.chip-arc:active { background: color-mix(in srgb, var(--accent) 16%, transparent); }
+
 /* ---------- Controls (filter + group bar) ---------- */
 .controls {
   margin-top: 18px;
@@ -2289,6 +2297,30 @@ body.sheet-open, body.sheet-open * {
 .comp-sort.on { background: var(--accent); color: #fff; border-color: var(--accent); }
 .comp-sortbar .ctl-tally { margin-left: auto; font-size: 11.5px; color: var(--ink-3); }
 
+/* League Tables */
+.league-list { display: flex; flex-direction: column; }
+.league-row {
+  width: 100%; display: flex; align-items: center; gap: 11px;
+  background: none; border: none; border-bottom: 1px solid var(--rule);
+  padding: 9px 4px; cursor: pointer; text-align: left;
+  -webkit-tap-highlight-color: transparent;
+}
+.league-row:last-child { border-bottom: none; }
+.league-row:active { background: var(--box); }
+.league-rank {
+  flex: none; width: 20px; text-align: center;
+  font-size: 12px; font-weight: 700; color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+.player-avatar.league-av { width: 34px; height: 34px; flex: none; }
+.player-avatar.league-av.mono { font-size: 12px; }
+.league-main { flex: 1; min-width: 0; }
+.league-name { font-size: 14px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.league-sub { font-size: 11.5px; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.league-stat { flex: none; text-align: right; }
+.league-count { font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.league-vol { font-size: 11px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+
 /* ============ Phase 5: threads, calendar, metrics ============ */
 
 .desk-links { display: flex; gap: 10px; margin: 2px 0 22px; }
@@ -2422,7 +2454,14 @@ body.sheet-open, body.sheet-open * {
 
 /* --- calendar --- */
 /* layout toggle (Agenda / Month) */
-.cal-toggle { display: inline-flex; border: 1px solid var(--rule); border-radius: 999px; overflow: hidden; margin-bottom: 16px; }
+.cal-toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 16px; }
+.cal-ics {
+  font-size: 12.5px; font-weight: 600; color: var(--ink-2);
+  background: none; border: 1px solid var(--rule); border-radius: 999px;
+  padding: 7px 14px; cursor: pointer; -webkit-tap-highlight-color: transparent;
+}
+.cal-ics:active { background: var(--box); }
+.cal-toggle { display: inline-flex; border: 1px solid var(--rule); border-radius: 999px; overflow: hidden; }
 .cal-toggle button {
   font-size: 12.5px; font-weight: 600; color: var(--ink-2);
   background: none; border: none; padding: 7px 18px; cursor: pointer;

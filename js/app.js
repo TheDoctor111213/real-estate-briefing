@@ -5,7 +5,7 @@
    History has no tab of its own — it's reached by tapping the masthead date. It still gets a hash route.
    Data lives in Supabase (public-read); the pipeline upserts via scripts/push_data.py. */
 
-const APP_VERSION = "v64";
+const APP_VERSION = "v65";
 const SUPABASE_URL = "https://uhwdnmbxiopfysodydty.supabase.co";
 const SUPABASE_KEY = "sb_publishable_LEQ5_-jjcRRl2p0wlaiXcw_RX4Wf8-y";
 
@@ -110,6 +110,8 @@ const state = {
   compSort: "recent",  // comps sort: "recent" | "value" | "psf" | "punit"
   compAsset: null,     // asset class scoping the by-market comps
   capAsset: null,      // asset class scoping the by-market cap rates
+  leagueRole: "buyer", // League Tables active role
+  leagueWin: 0,        // League Tables window in days (0 = all time)
   calView: "agenda",   // calendar layout: "agenda" | "month"
   calMonth: null,      // month shown in grid view (YYYY-MM)
   calDay: null,        // day selected in grid view (YYYY-MM-DD)
@@ -914,6 +916,17 @@ function storyChips(story) {
   if (v) wrap.appendChild(chip(v, "chip-value"));
   const per = derivedMetric(story);
   if (per) wrap.appendChild(chip(per));
+  // arc chip: this story is a registered thread installment — tap through to the
+  // timeline (stop the card's own click so it doesn't open the reader instead)
+  if (story.thread) {
+    const arc = chip("🧵 Arc", "chip-arc");
+    arc.setAttribute("role", "link");
+    arc.addEventListener("click", (e) => {
+      e.preventDefault(); e.stopPropagation();
+      location.hash = `/thread/${story.thread}`;
+    });
+    wrap.appendChild(arc);
+  }
   return wrap.children.length ? wrap : null;
 }
 
@@ -2110,6 +2123,122 @@ function renderLedgerList(priced) {
   for (const s of list.slice(0, 120)) box.appendChild(ledgerRow(s));
 }
 
+/* ---------- League Tables ----------
+   Who is most active, by the role they actually played in a deal. Built from the
+   players roster's mention ledger (each mention carries {role, valueUsd, date}),
+   so it sharpens with every deal the pipeline credits — a real "most-active
+   buyers / lenders / brokers this quarter" board, tap-through to each dossier. */
+const LEAGUE_ROLES = [
+  ["buyer", "Buyers", "🏢"],
+  ["seller", "Sellers", "🏷️"],
+  ["lender", "Lenders", "🏦"],
+  ["developer", "Developers", "🏗️"],
+  ["landlord", "Landlords", "🔑"],
+  ["broker", "Brokers", "🤝"],
+];
+const LEAGUE_WINS = [[0, "All time"], [90, "90 days"], [30, "30 days"]];
+
+function buildLeagueTables(body, players) {
+  body.innerHTML = "";
+  const roster = [...players.values()];
+  if (!roster.length) {
+    body.appendChild(emptyPanel("No players yet",
+      "As the roster credits buyers, sellers, lenders and brokers on deals, the most-active players rank here by role."));
+    return;
+  }
+  const note = document.createElement("p");
+  note.className = "trends-note";
+  note.textContent = "Most-active players by the role they played, ranked on deals credited over the window. Counts real transaction roles from the roster — it deepens with every deal the pipeline attributes.";
+  body.appendChild(note);
+
+  // role selector
+  const roleBar = document.createElement("div");
+  roleBar.className = "comp-assetchips";
+  for (const [key, label, emoji] of LEAGUE_ROLES) {
+    const c = document.createElement("button");
+    c.className = "comp-assetchip" + (state.leagueRole === key ? " on" : "");
+    c.textContent = `${emoji} ${label}`;
+    c.addEventListener("click", () => { state.leagueRole = key; buildLeagueTables(body, players); });
+    roleBar.appendChild(c);
+  }
+  body.appendChild(roleBar);
+
+  // window selector
+  const winBar = document.createElement("div");
+  winBar.className = "comp-sortbar";
+  for (const [days, label] of LEAGUE_WINS) {
+    const b = document.createElement("button");
+    b.className = "comp-sort" + (state.leagueWin === days ? " on" : "");
+    b.textContent = label;
+    b.addEventListener("click", () => { state.leagueWin = days; buildLeagueTables(body, players); });
+    winBar.appendChild(b);
+  }
+  body.appendChild(winBar);
+
+  const role = state.leagueRole;
+  const win = state.leagueWin;
+  const ranked = [];
+  for (const p of roster) {
+    let count = 0, volume = 0;
+    for (const mn of (p.mentions || [])) {
+      if (mn.role !== role) continue;
+      if (win && daysSince(mn.date) > win) continue;
+      count++;
+      if (typeof mn.valueUsd === "number") volume += mn.valueUsd;
+    }
+    if (count) ranked.push({ p, count, volume });
+  }
+  ranked.sort((a, b) => b.count - a.count || b.volume - a.volume || a.p.name.localeCompare(b.p.name));
+
+  if (!ranked.length) {
+    const empty = document.createElement("p");
+    empty.className = "trends-note";
+    const label = (LEAGUE_ROLES.find((r) => r[0] === role) || [, "players"])[1].toLowerCase();
+    empty.textContent = win ? `No ${label} credited in the last ${win} days.` : `No ${label} credited yet.`;
+    body.appendChild(empty);
+    return;
+  }
+
+  const list = document.createElement("div");
+  list.className = "league-list";
+  ranked.slice(0, 25).forEach((r, i) => list.appendChild(leagueRow(r, i + 1)));
+  body.appendChild(list);
+}
+
+function leagueRow({ p, count, volume }, rank) {
+  const el = document.createElement("button");
+  el.className = "league-row";
+  el.addEventListener("click", () => { location.hash = `/player/${p.slug}`; });
+  const num = document.createElement("span");
+  num.className = "league-rank";
+  num.textContent = rank;
+  const av = playerAvatar(p);
+  av.classList.add("league-av");
+  const main = document.createElement("div");
+  main.className = "league-main";
+  const name = document.createElement("div");
+  name.className = "league-name";
+  name.textContent = p.name;
+  const sub = document.createElement("div");
+  sub.className = "league-sub";
+  sub.textContent = p.role || (p.type === "person" ? "Person" : "Company");
+  main.append(name, sub);
+  const stat = document.createElement("div");
+  stat.className = "league-stat";
+  const c = document.createElement("div");
+  c.className = "league-count";
+  c.textContent = `${count} deal${count === 1 ? "" : "s"}`;
+  stat.appendChild(c);
+  if (volume) {
+    const v = document.createElement("div");
+    v.className = "league-vol";
+    v.textContent = fmtValue(volume);
+    stat.appendChild(v);
+  }
+  el.append(num, av, main, stat);
+  return el;
+}
+
 async function renderTrends() {
   const wrap = $("trends-content");
   wrap.innerHTML = "";
@@ -2133,10 +2262,12 @@ async function renderTrends() {
 
   const priced = stories.filter((s) => s.valueUsd);
   const metrics = await getMetrics();
+  const players = await getPlayers();
   const distress = stories.filter((s) => s.dealType === "Distress").sort((a, b) => b._date.localeCompare(a._date));
 
   wrap.appendChild(deskSection("comps", "Comps — by market", null, true, (b) => buildComps(b, priced)));
   wrap.appendChild(deskSection("caprates", "Cap Rates — by market", null, true, (b) => buildCapRates(b, stories)));
+  wrap.appendChild(deskSection("league", "League Tables", null, false, (b) => buildLeagueTables(b, players)));
   wrap.appendChild(deskSection("metrics", "Market Metrics", metrics.length || null, true, (b) => buildMetrics(b, metrics)));
   if (distress.length) wrap.appendChild(deskSection("distress", "Distress Watch", distress.length, false, (b) => buildDistress(b, distress)));
   wrap.appendChild(deskSection("pulse", "Coverage Pulse", null, false, (b) => buildPulse(b, stories)));
@@ -5271,7 +5402,9 @@ async function renderCalendar() {
   const storyIndex = new Map();
   for (const d of days) for (const s of (d.stories || [])) storyIndex.set(d.date + "|" + s.id, { ...s, _date: d.date });
 
-  // Agenda / Month layout toggle
+  // Agenda / Month layout toggle + export
+  const toolbar = document.createElement("div");
+  toolbar.className = "cal-toolbar";
   const toggle = document.createElement("div");
   toggle.className = "cal-toggle";
   for (const [key, label] of [["agenda", "Agenda"], ["month", "Month"]]) {
@@ -5281,10 +5414,60 @@ async function renderCalendar() {
     b.addEventListener("click", () => { state.calView = key; renderCalendar(); });
     toggle.appendChild(b);
   }
-  wrap.appendChild(toggle);
+  toolbar.appendChild(toggle);
+  const today = todayISO();
+  const future = events.filter((e) => (e.date || "") >= today && !e.resolvedBy);
+  if (future.length) {
+    const ics = document.createElement("button");
+    ics.className = "cal-ics";
+    ics.textContent = "⤓ Add to calendar";
+    ics.addEventListener("click", () => exportICS(future));
+    toolbar.appendChild(ics);
+  }
+  wrap.appendChild(toolbar);
 
   if (state.calView === "month") renderCalendarMonth(wrap, events, storyIndex);
   else renderCalendarAgenda(wrap, events, storyIndex);
+}
+
+/* Export upcoming catalysts as an .ics the reader can drop into Apple/Google
+   Calendar — all-day events, one VEVENT each, generated entirely client-side. */
+function icsDate(iso) { return (iso || "").replace(/-/g, ""); }
+function icsEscape(s) { return String(s || "").replace(/[\\;,]/g, "\\$&").replace(/\n/g, "\\n"); }
+
+function exportICS(events) {
+  const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d+/, "");
+  const lines = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//CRE Briefing//Calendar//EN", "CALSCALE:GREGORIAN"];
+  for (const e of events) {
+    if (!e.date) continue;
+    const start = new Date(e.date + "T00:00:00");
+    const end = new Date(start.getTime() + 86400000);
+    const endIso = end.toISOString().slice(0, 10);
+    const bits = [];
+    if (e.market && e.market !== "National") bits.push(e.market);
+    if (e.approx === "month") bits.push("date approximate");
+    lines.push(
+      "BEGIN:VEVENT",
+      `UID:${e.id}@briefing.pierrepontcompanies.com`,
+      `DTSTAMP:${stamp}`,
+      `DTSTART;VALUE=DATE:${icsDate(e.date)}`,
+      `DTEND;VALUE=DATE:${icsDate(endIso)}`,
+      `SUMMARY:${icsEscape((EVENT_ICON[e.type] || "📌") + " " + (e.title || ""))}`,
+      `DESCRIPTION:${icsEscape([bits.join(" · "), "From the CRE Briefing calendar."].filter(Boolean).join("\n"))}`,
+      "END:VEVENT",
+    );
+  }
+  lines.push("END:VCALENDAR");
+  const blob = new Blob([lines.join("\r\n")], { type: "text/calendar" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "cre-briefing-calendar.ics";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+  flashToast(`${events.length} event${events.length === 1 ? "" : "s"} exported`);
 }
 
 function renderCalendarAgenda(wrap, events, storyIndex) {
