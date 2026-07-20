@@ -5,7 +5,7 @@
    History has no tab of its own — it's reached by tapping the masthead date. It still gets a hash route.
    Data lives in Supabase (public-read); the pipeline upserts via scripts/push_data.py. */
 
-const APP_VERSION = "v57";
+const APP_VERSION = "v58";
 const SUPABASE_URL = "https://uhwdnmbxiopfysodydty.supabase.co";
 const SUPABASE_KEY = "sb_publishable_LEQ5_-jjcRRl2p0wlaiXcw_RX4Wf8-y";
 
@@ -197,50 +197,84 @@ async function init() {
       openTermSheet(term.dataset.slug);
     }
   }, true);
-  $("sheet-backdrop").addEventListener("click", closeSheet);
-  // swipe the sheet down to dismiss (Instagram-style)
-  let sheetTouchY = null;
-  $("sheet-card").addEventListener("touchstart", (e) => { sheetTouchY = e.touches[0].clientY; }, { passive: true });
-  $("sheet-card").addEventListener("touchmove", (e) => {
-    if (sheetTouchY !== null && e.touches[0].clientY - sheetTouchY > 70) { sheetTouchY = null; closeSheet(); }
-  }, { passive: true });
+  $("sheet-backdrop").addEventListener("click", () => sheetDismiss());
+  // drag the sheet with your finger — tracks smoothly, springs back or flings away
+  const sheetCard = $("sheet-card");
+  sheetCard.addEventListener("touchstart", (e) => { sheetDragStart(e.touches[0].clientY); }, { passive: true });
+  sheetCard.addEventListener("touchmove", (e) => {
+    if (sheetDragY === null) return;
+    const dy = e.touches[0].clientY - sheetDragY;
+    if (dy > 0) { e.preventDefault(); sheetDragMove(e.touches[0].clientY); } // downward = drag; up stays scroll
+  }, { passive: false });
+  sheetCard.addEventListener("touchend", () => sheetDragEnd());
+  sheetCard.addEventListener("touchcancel", () => sheetDragEnd());
 
-  // reader: swipe left/right moves through the day's stories in feed order
+  // reader: horizontal swipe = prev/next story; pull down from the top =
+  // close, tracking the finger the whole way (springs back if you let go early)
   const reader = $("reader");
-  let swipeStart = null;
+  let rt = null;
   reader.addEventListener("touchstart", (e) => {
-    if (e.touches.length === 1) swipeStart = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+    if (e.touches.length !== 1) { rt = null; return; }
+    rt = { x: e.touches[0].clientX, y: e.touches[0].clientY, dx: 0, dy: 0, axis: null };
   }, { passive: true });
-  reader.addEventListener("touchend", (e) => {
-    if (!swipeStart) return;
-    const dx = e.changedTouches[0].clientX - swipeStart.x;
-    const dy = e.changedTouches[0].clientY - swipeStart.y;
-    swipeStart = null;
-    if (Math.abs(dx) > 70 && Math.abs(dy) < 60) readerStep(dx < 0 ? 1 : -1);
-    // pull down from the top to close the reader (universal, any content)
-    else if (dy > 110 && Math.abs(dx) < 70 && reader.scrollTop <= 2) closeReaderNav();
-  }, { passive: true });
+  reader.addEventListener("touchmove", (e) => {
+    if (!rt) return;
+    rt.dx = e.touches[0].clientX - rt.x;
+    rt.dy = e.touches[0].clientY - rt.y;
+    if (!rt.axis && (Math.abs(rt.dx) > 10 || Math.abs(rt.dy) > 10)) {
+      if (Math.abs(rt.dy) > Math.abs(rt.dx) && rt.dy > 0 && reader.scrollTop <= 0) rt.axis = "close";
+      else rt.axis = Math.abs(rt.dx) > Math.abs(rt.dy) ? "x" : "scroll";
+    }
+    if (rt.axis === "close") {
+      e.preventDefault();
+      const y = Math.max(0, rt.dy);
+      reader.style.transition = "none";
+      reader.style.transform = `translateY(${y * 0.7}px)`;
+      reader.style.opacity = String(Math.max(0.35, 1 - y / 640));
+    }
+  }, { passive: false });
+  const readerTouchEnd = () => {
+    if (!rt) return;
+    const { axis, dx, dy } = rt;
+    rt = null;
+    if (axis === "x" && Math.abs(dx) > 70) readerStep(dx < 0 ? 1 : -1);
+    else if (axis === "close") {
+      if (dy > 130) {
+        reader.style.transition = "transform .2s ease, opacity .2s ease";
+        reader.style.transform = "translateY(100%)";
+        reader.style.opacity = "0";
+        setTimeout(() => { closeReaderNav(); reader.style.transition = ""; reader.style.transform = ""; reader.style.opacity = ""; }, 190);
+      } else {
+        reader.style.transition = "transform .26s cubic-bezier(.2,.9,.25,1), opacity .26s ease";
+        reader.style.transform = ""; reader.style.opacity = "";
+      }
+    }
+  };
+  reader.addEventListener("touchend", readerTouchEnd, { passive: true });
+  reader.addEventListener("touchcancel", readerTouchEnd, { passive: true });
   // scroll memory + "~N min left"
   reader.addEventListener("scroll", onReaderScroll, { passive: true });
   // TTS playback of the open story
   $("reader-listen").addEventListener("click", toggleTTS);
 
-  // feed card gestures: swipe right = save ★, swipe left = mark read;
-  // long-press = peek preview without opening. Vertical drags stay scrolls.
+  // feed card gestures: swipe right = save ★, swipe left = toggle read/unread;
+  // long-press = draggable peek preview. Vertical drags stay scrolls.
   const feed = $("feed");
   let ft = null;
   feed.addEventListener("touchstart", (e) => {
     const card = e.target.closest(".story[data-id]");
     if (!card || e.touches.length !== 1) { ft = null; return; }
     const t = e.touches[0];
-    ft = { card, x: t.clientX, y: t.clientY, dx: 0, horiz: false, moved: false, longpressed: false };
+    ft = { card, x: t.clientX, y: t.clientY, dx: 0, horiz: false, moved: false, mode: null };
     ft.timer = setTimeout(() => {
-      if (ft && !ft.moved) { ft.longpressed = true; openStoryPeek(card.dataset.date, card.dataset.id); }
-    }, 500);
+      // long-press: open the peek and hand this same finger into the sheet drag
+      if (ft && !ft.moved) { ft.mode = "peek"; openStoryPeek(card.dataset.date, card.dataset.id, ft.y); }
+    }, 450);
   }, { passive: true });
   feed.addEventListener("touchmove", (e) => {
     if (!ft) return;
     const t = e.touches[0];
+    if (ft.mode === "peek") { e.preventDefault(); sheetDragMove(t.clientY); return; }
     const dx = t.clientX - ft.x, dy = t.clientY - ft.y;
     if (!ft.horiz && !ft.moved && (Math.abs(dx) > 8 || Math.abs(dy) > 8)) {
       ft.moved = true; clearTimeout(ft.timer);
@@ -255,10 +289,11 @@ async function init() {
       ft.card.classList.toggle("swipe-read", dx < -45);
     }
   }, { passive: false });
-  const endFeed = () => {
+  const endFeed = (e) => {
     if (!ft) return;
     clearTimeout(ft.timer);
-    const { card, dx, horiz, longpressed } = ft;
+    if (ft.mode === "peek") { sheetDragEnd(); if (e && e.cancelable) e.preventDefault(); ft = null; return; }
+    const { card, dx, horiz } = ft;
     card.style.transition = "transform .2s ease";
     card.style.transform = "";
     card.classList.remove("swipe-save", "swipe-read");
@@ -268,14 +303,16 @@ async function init() {
         const story = (state.days.get(date)?.stories || []).find((s) => s.id === id);
         if (story) flashToast(toggleSaved(story, date) ? "Saved ★" : "Removed");
       } else {
-        setRead(date, id, true); card.classList.add("is-read"); flashToast("Marked read");
+        const nowRead = !isRead(date, id);
+        setRead(date, id, nowRead); card.classList.toggle("is-read", nowRead);
+        flashToast(nowRead ? "Marked read" : "Marked unread");
       }
     }
-    if (horiz || longpressed) suppressNextClick();
+    if (horiz && e && e.cancelable) e.preventDefault(); // no synthetic click after a swipe
     ft = null;
   };
-  feed.addEventListener("touchend", endFeed);
-  feed.addEventListener("touchcancel", endFeed);
+  feed.addEventListener("touchend", endFeed, { passive: false });
+  feed.addEventListener("touchcancel", endFeed, { passive: false });
 
   // share the open story as a typographic image card
   $("reader-share").addEventListener("click", () => {
@@ -3398,6 +3435,7 @@ async function openReaderRoute(date, id) {
   paintListenBtn(false);
 
   const reader = $("reader");
+  reader.style.transition = ""; reader.style.transform = ""; reader.style.opacity = ""; // clear any pull-to-close residue
   reader.hidden = false;
   document.body.classList.add("reader-open");
   // scroll-position memory: return to where you left this story, else the top
@@ -3522,6 +3560,8 @@ function openSheet(build) {
   const sheet = $("sheet");
   const card = $("sheet-card");
   card.innerHTML = "";
+  card.style.transition = "";   // clear any leftover drag inline styles so the
+  card.style.transform = "";    // CSS .open rise/fall animates cleanly
   build(card);
   sheet.hidden = false;
   requestAnimationFrame(() => sheet.classList.add("open"));
@@ -3529,6 +3569,9 @@ function openSheet(build) {
 
 function closeSheet() {
   const sheet = $("sheet");
+  const card = $("sheet-card");
+  card.style.transition = ""; card.style.transform = ""; // let CSS animate the fall
+  peekTarget = null; sheetDragY = null;
   sheet.classList.remove("open");
   setTimeout(() => { sheet.hidden = true; }, 260);
 }
@@ -3538,15 +3581,57 @@ function sheetGo(hash) {
   location.hash = hash;
 }
 
-// swallow the tap that ends a swipe/long-press so the card doesn't also open
-function suppressNextClick() {
-  document.addEventListener("click", (e) => { e.stopPropagation(); e.preventDefault(); }, { capture: true, once: true });
+/* ---------- draggable bottom sheet (peek + dossiers) ----------
+   Tracks the finger 1:1 (bob up/down), rubber-bands when pulled above open,
+   and on release either springs back, flings away, or — for a story peek —
+   flings up to open the story. */
+let sheetDragY = null;   // start Y of an active drag, or null when idle
+let sheetDy = 0;
+let peekTarget = null;   // {date,id} a story peek can fling up to open
+
+function sheetDragStart(y) { sheetDragY = y; sheetDy = 0; }
+function sheetDragMove(y) {
+  if (sheetDragY === null) return;
+  sheetDy = y - sheetDragY;
+  const px = sheetDy > 0 ? sheetDy : sheetDy * 0.32; // resistance when pulling up
+  const c = $("sheet-card");
+  c.style.transition = "none";
+  c.style.transform = `translateY(${px}px)`;
+}
+function sheetDragEnd() {
+  if (sheetDragY === null) return;
+  const dy = sheetDy;
+  sheetDragY = null; sheetDy = 0;
+  if (dy > 90) sheetDismiss();
+  else if (dy < -55 && peekTarget) sheetOpenStory();
+  else sheetSettle();
+}
+function sheetSettle() {
+  const c = $("sheet-card");
+  c.style.transition = "transform .26s cubic-bezier(.2,.9,.25,1)";
+  c.style.transform = "translateY(0)";
+}
+function sheetDismiss() {
+  const c = $("sheet-card");
+  c.style.transition = "transform .24s cubic-bezier(.35,0,.7,1)";
+  c.style.transform = "translateY(110%)";
+  peekTarget = null; sheetDragY = null;
+  setTimeout(() => { const s = $("sheet"); s.classList.remove("open"); s.hidden = true; }, 210);
+}
+function sheetOpenStory() {
+  const t = peekTarget; peekTarget = null; sheetDragY = null;
+  const c = $("sheet-card");
+  c.style.transition = "transform .16s ease-out";
+  c.style.transform = "translateY(-6px)";
+  setTimeout(() => { const s = $("sheet"); s.classList.remove("open"); s.hidden = true; if (t) location.hash = `/story/${t.date}/${t.id}`; }, 140);
 }
 
-// long-press peek: summary + hero in a sheet, without opening the full reader
-function openStoryPeek(date, id) {
+// long-press peek: summary + hero in a sheet; the long-press finger keeps
+// dragging it (fromY), so you can bob it and fling up (open) or down (dismiss)
+function openStoryPeek(date, id, fromY) {
   const story = (state.days.get(date)?.stories || []).find((s) => s.id === id);
   if (!story) return;
+  peekTarget = isExpandable(story) ? { date, id } : null;
   openSheet((card) => {
     if (story.image) {
       const fig = document.createElement("div");
@@ -3572,10 +3657,11 @@ function openStoryPeek(date, id) {
       const open = document.createElement("button");
       open.className = "peek-open";
       open.textContent = "Open story →";
-      open.addEventListener("click", () => sheetGo(`/story/${date}/${id}`));
+      open.addEventListener("click", () => sheetOpenStory());
       card.appendChild(open);
     }
   });
+  if (fromY != null) sheetDragStart(fromY);
 }
 
 async function openPlayerSheet(slug) {
