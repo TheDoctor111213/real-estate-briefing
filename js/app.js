@@ -5,7 +5,7 @@
    History has no tab of its own — it's reached by tapping the masthead date. It still gets a hash route.
    Data lives in Supabase (public-read); the pipeline upserts via scripts/push_data.py. */
 
-const APP_VERSION = "v76";
+const APP_VERSION = "v77";
 const SUPABASE_URL = "https://uhwdnmbxiopfysodydty.supabase.co";
 const SUPABASE_KEY = "sb_publishable_LEQ5_-jjcRRl2p0wlaiXcw_RX4Wf8-y";
 // Mapbox public token — a pk.* token is meant to ship to browsers, but GitHub's
@@ -2481,8 +2481,7 @@ const DESK_CATALOG = [
   { id: "caprates", icon: "🎯", title: "Cap Rates", blurb: "What each market is pricing, straight from deal coverage" },
   { id: "distress", icon: "⚠️", title: "Distress Watch", blurb: "Defaults, foreclosures and forced sales as they surface" },
   { id: "ledger", icon: "💵", title: "Deal Ledger", blurb: "Every priced deal, filterable and sortable" },
-  { id: "pulse", icon: "📈", title: "Market Pulse", blurb: "The national backdrop — rates, home prices, rents, credit — in deep, real data" },
-  { id: "metrics", icon: "📊", title: "Market Metrics", blurb: "Figures the trade press cites — delinquency, vacancy, rents" },
+  { id: "pulse", icon: "📈", title: "Market Pulse", blurb: "The market backdrop — public-API series plus the CRE figures the trade press cites, all in one place" },
   { id: "coverage", icon: "🔥", title: "Coverage Pulse", blurb: "What the desks are covering this week versus last" },
 ];
 
@@ -2502,11 +2501,10 @@ async function renderTrends() {
   const distress = stories.filter((s) => s.dealType === "Distress");
 
   const stat = {
-    pulse: pulse?.national ? `${Object.keys(pulse.national).length} indicators live` : "live data",
+    pulse: pulse?.national ? `${Object.keys(pulse.national).length} live + ${metrics.length} cited` : "live data",
     comps: `${new Set(priced.map((s) => s.market).filter(Boolean)).size} markets`,
     caprates: `${stories.filter((s) => capRateOf(s)).length} rates`,
     league: `${players.size} players`,
-    metrics: `${metrics.length} series`,
     distress: `${distress.length} on watch`,
     coverage: `${stories.length} stories`,
     ledger: `${priced.length} priced deals`,
@@ -2536,14 +2534,16 @@ async function renderDeskSection(id) {
   const wrap = $("trends-content");
   wrap.innerHTML = "";
   wrap.appendChild(backLink("The Desk", "#/trends"));
+  // legacy: Market Metrics folded into Market Pulse — send old links there
+  if (id === "metrics") { location.replace("#/desk/pulse"); return; }
   const item = DESK_CATALOG.find((x) => x.id === id);
   if (!item) { wrap.appendChild(emptyPanel("Not found", "That board isn't here.")); return; }
 
   if (id === "pulse") {
     wrap.appendChild(pageHead("Market Pulse",
-      "The national market read, pooled from public data the trade shops themselves quote — the Fed's rate and credit series, Case-Shiller home prices, and Zillow's market-by-market rents. Tap any signal for its full history."));
-    const pulse = await getPulse();
-    buildMarketPulse(wrap, pulse);
+      "One read on the whole market: public-API series (Fed rates & credit, Case-Shiller prices, Zillow rents by metro) plus the CRE figures the trade press cites (Trepp delinquency, CBRE vacancy, cap-rate surveys) — the numbers the paid data shops sell — each tagged by source. Tap any signal for its full history."));
+    const [pulse, metrics] = await Promise.all([getPulse(), getMetrics()]);
+    buildMarketPulse(wrap, pulse, metrics);
     return;
   }
 
@@ -2554,7 +2554,7 @@ async function renderDeskSection(id) {
   const body = document.createElement("div");
   body.className = "desk-page";
   wrap.appendChild(body);
-  if (!stories.length && id !== "metrics") {
+  if (!stories.length) {
     body.appendChild(emptyPanel("Nothing here yet", "This board fills as briefings accumulate."));
     return;
   }
@@ -2562,7 +2562,6 @@ async function renderDeskSection(id) {
     case "comps": buildComps(body, priced); break;
     case "caprates": buildCapRates(body, stories); break;
     case "league": buildLeagueTables(body, await getPlayers()); break;
-    case "metrics": buildMetrics(body, await getMetrics()); break;
     case "distress": buildDistress(body, distressStories(stories)); break;
     case "coverage": buildPulse(body, stories); break;
     case "ledger": buildLedger(body, priced); break;
@@ -2600,7 +2599,18 @@ function fmtPulseLevel(v, unit) {
 
 function signed(n, digits = 1) { return (n >= 0 ? "+" : "") + n.toFixed(digits); }
 
-function buildMarketPulse(wrap, pulse) {
+/* Which Pulse tab a coverage-cited metric belongs under. Credit/debt figures →
+   Rates & Credit; construction/supply/jobs → Economy; everything else (rents,
+   vacancy, prices) → Housing & Rents. Keeps the trade-cited CRE numbers next to
+   the public-API series that cover the same theme. */
+function metricGroup(m) {
+  const s = ((m.id || "") + " " + (m.name || "")).toLowerCase();
+  if (/delinquen|special.?serv|servic|cmbs|cap.?rate|spread|yield|sofr|treasur|credit|debt|lending|dscr|\bltv\b|maturit|refinanc/.test(s)) return "rates";
+  if (/\bstart|construct|permit|pipeline|deliver|\bgdp\b|employ|payroll|\bjobs\b|industrial|supply|absorption/.test(s)) return "economy";
+  return "housing";
+}
+
+function buildMarketPulse(wrap, pulse, metrics = []) {
   if (!pulse?.national || !Object.keys(pulse.national).length) {
     wrap.appendChild(emptyPanel("Market Pulse is warming up",
       "The national data feed refreshes a few times a day. Check back shortly."));
@@ -2661,6 +2671,21 @@ function buildMarketPulse(wrap, pulse) {
       see.href = "#/rates";
       see.innerHTML = "See the full Treasury curve, forwards &amp; SOFR &rarr;";
       groupBox.appendChild(see);
+    }
+    // CRE figures the trade press cites (Trepp delinquency, CBRE vacancy, cap-rate
+    // surveys) — the numbers public APIs don't carry. Shown right under the matching
+    // API series, but visually set apart: they're point-in-time prints, not a feed.
+    const cited = (metrics || []).filter((m) => metricGroup(m) === state.pulseGroup);
+    if (cited.length) {
+      const ch = document.createElement("div");
+      ch.className = "pulse-cited-head";
+      ch.innerHTML = '<span class="pcc-title">Cited by coverage</span>'
+        + '<span class="pcc-sub">CRE figures the trade press quoted — point-in-time prints, not a continuous feed</span>';
+      groupBox.appendChild(ch);
+      const mg = document.createElement("div");
+      mg.className = "metric-grid";
+      for (const m of [...cited].sort((a, b) => (b.series?.length || 0) - (a.series?.length || 0))) mg.appendChild(metricCard(m));
+      groupBox.appendChild(mg);
     }
   }
   function selectGroup(g) {
