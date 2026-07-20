@@ -5,7 +5,7 @@
    History has no tab of its own — it's reached by tapping the masthead date. It still gets a hash route.
    Data lives in Supabase (public-read); the pipeline upserts via scripts/push_data.py. */
 
-const APP_VERSION = "v68";
+const APP_VERSION = "v69";
 const SUPABASE_URL = "https://uhwdnmbxiopfysodydty.supabase.co";
 const SUPABASE_KEY = "sb_publishable_LEQ5_-jjcRRl2p0wlaiXcw_RX4Wf8-y";
 // Mapbox public token — a pk.* token is meant to ship to browsers, but GitHub's
@@ -6418,8 +6418,10 @@ async function renderStatus() {
 
   const latest = state.dates[state.dates.length - 1];
   const [day, hb] = await Promise.all([getDay(latest), readHeartbeatRow()]);
-  let secretsMeta = [];
-  try { secretsMeta = await sb("secrets?id=in.(trd_session,session_bisnow.com)&select=id,data,updated_at"); } catch { /* offline */ }
+  // session health comes from the PUBLIC app_status table (metadata only — the
+  // cookies themselves live in the locked-down secrets vault the app never reads)
+  let connMeta = [];
+  try { connMeta = await sb("app_status?id=in.(conn_therealdeal.com,conn_bisnow.com)&select=id,data"); } catch { /* offline */ }
   let ratesAt = null;
   try { const r = await sb("rates_cache?id=eq.1&select=generated_at"); ratesAt = r[0]?.generated_at || null; } catch { /* offline */ }
 
@@ -6478,14 +6480,16 @@ async function renderStatus() {
   wrap.appendChild(srcCard);
 
   const sysCard = statusCard("Sessions & rates");
-  for (const [id, label] of [["trd_session", "The Real Deal login"], ["session_bisnow.com", "Bisnow login"]]) {
-    const row = secretsMeta.find((r) => r.id === id);
-    const at = row?.data?.savedAt || row?.updated_at;
+  for (const [id, label] of [["conn_therealdeal.com", "The Real Deal login"], ["conn_bisnow.com", "Bisnow login"]]) {
+    const row = connMeta.find((r) => r.id === id);
+    const at = row?.data?.savedAt;
+    const needs = row?.data?.needsReconnect;
     // neutral tone on purpose: a stored cookie is NOT proof content is fetching.
-    // Most subscriber articles ship full text without a login; the cookie only
-    // matters for a few gated pages. So we report "when stored", not "healthy".
-    statusRow(sysCard, label, at ? `cookie saved ${fmtAge(ageMin(at))}` : "not stored",
-      at && ageMin(at) / 1440 > 60 ? "warn" : "");
+    // Most subscriber articles ship full text without a login. Red only when the
+    // pipeline actually detected a session-gated fetch failing (needsReconnect).
+    statusRow(sysCard, label,
+      needs ? "reconnect needed" : at ? `cookie saved ${fmtAge(ageMin(at))}` : "not stored",
+      needs ? "bad" : at && ageMin(at) / 1440 > 60 ? "warn" : "");
   }
   const sNote = document.createElement("p");
   sNote.className = "status-note";

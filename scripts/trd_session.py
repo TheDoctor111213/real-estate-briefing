@@ -81,6 +81,8 @@ def store(cookie_header: str, how: str) -> None:
             "note": "Browser session cookies only; no password is ever stored.",
         },
     }
+    # return=minimal: the vault denies anon SELECT, so don't ask PostgREST to
+    # echo the row back (that would need a read privilege we intentionally lack).
     req = urllib.request.Request(
         f"{SUPABASE_URL}/rest/v1/secrets",
         data=json.dumps(row).encode(),
@@ -88,12 +90,24 @@ def store(cookie_header: str, how: str) -> None:
             "apikey": ANON_KEY,
             "Authorization": f"Bearer {ANON_KEY}",
             "Content-Type": "application/json",
-            "Prefer": "resolution=merge-duplicates",
+            "Prefer": "resolution=merge-duplicates,return=minimal",
         },
         method="POST",
     )
     with urllib.request.urlopen(req, timeout=30) as resp:
-        assert resp.status in (200, 201)
+        assert resp.status in (200, 201, 204)
+    # non-secret connection metadata lives in the public app_status table so the
+    # app can show session health WITHOUT ever reading the cookie vault
+    meta = {"id": f"conn_{domain}", "data": {"domain": domain, "savedAt": row["data"]["savedAt"], "needsReconnect": False}}
+    try:
+        mreq = urllib.request.Request(
+            f"{SUPABASE_URL}/rest/v1/app_status", data=json.dumps(meta).encode(),
+            headers={"apikey": ANON_KEY, "Authorization": f"Bearer {ANON_KEY}",
+                     "Content-Type": "application/json", "Prefer": "resolution=merge-duplicates,return=minimal"},
+            method="POST")
+        urllib.request.urlopen(mreq, timeout=15).read()
+    except Exception:
+        pass
     print(f"Session cookie stored. The pipeline will now use it for {domain} articles.")
 
 
