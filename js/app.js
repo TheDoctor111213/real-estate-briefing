@@ -4137,7 +4137,7 @@ function cardWrapText(x, text, maxWidth, maxLines) {
   return lines;
 }
 
-async function shareStoryCard(story, date) {
+function shareStoryCard(story, date) {
   // the shortest honest form of the article link: origin + path, no tracking
   let link = null;
   if (story.url) {
@@ -4268,16 +4268,48 @@ async function shareStoryCard(story, date) {
   x.fillText("briefing.pierrepontcompanies.com", W - P, fy);
   x.textAlign = "left";
 
-  const blob = await new Promise((r) => c.toBlob(r, "image/png"));
-  if (!blob) { flashToast("Couldn't render the card"); return; }
-  showShareBox(blob, `${story.id}.png`, link);
+  // Build the PNG SYNCHRONOUSLY (toDataURL, not the async toBlob). Awaiting a
+  // blob here would drop the user-activation and iOS would silently block the
+  // share — the whole point is to stay inside the live tap gesture.
+  const file = canvasToPngFile(c, `${story.id}.png`);
+  if (!file) { flashToast("Couldn't render the card"); return; }
+
+  // Stash the link on the clipboard first so it's there to paste (iOS Messages
+  // drops the image if text/url ride along with the file, so we can't attach
+  // it to the share itself). Best-effort — never blocks the share.
+  if (link) { try { navigator.clipboard?.writeText(link); } catch { /* ignore */ } }
+
+  // One tap → straight to the OS share sheet with the image (Messages, Mail,
+  // AirDrop…). Files ONLY, so Messages actually attaches the picture. Falls
+  // back to the in-app viewer on desktop / browsers without file share.
+  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    navigator.share({ files: [file] }).catch((e) => {
+      if (e && e.name === "AbortError") return;      // user closed the sheet — fine
+      showShareBox(file, `${story.id}.png`, link);    // real failure → the viewer
+    });
+    return;
+  }
+  showShareBox(file, `${story.id}.png`, link);
 }
 
-/* The card viewer. iOS standalone web apps can't reliably pass files through
-   the share sheet (the receiving app gets nothing — WebKit bug), so the card
-   lives here as a REAL image: touch-and-hold gives the native photo menu
-   (Share / Copy / Save), and each button runs in its own fresh tap gesture,
-   which is what the clipboard and share APIs actually require. */
+/* Canvas → PNG File, fully synchronous. toDataURL blocks (unlike toBlob), which
+   is exactly what we need: the File is ready without yielding the event loop, so
+   a navigator.share() right after still counts as user-initiated on iOS. */
+function canvasToPngFile(canvas, filename) {
+  try {
+    const b64 = canvas.toDataURL("image/png").split(",")[1];
+    const bin = atob(b64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return new File([bytes], filename, { type: "image/png" });
+  } catch { return null; }
+}
+
+/* The card viewer — now a FALLBACK, shown only when the direct native share
+   isn't available (desktop, older browsers) or it fails. The card lives here as
+   a REAL image: touch-and-hold gives the native photo menu (Share / Copy /
+   Save), and each button runs in its own fresh tap gesture, which is what the
+   clipboard and share APIs require. */
 let shareBoxState = null;
 
 function showShareBox(blob, filename, link) {
