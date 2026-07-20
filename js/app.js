@@ -5,7 +5,7 @@
    History has no tab of its own — it's reached by tapping the masthead date. It still gets a hash route.
    Data lives in Supabase (public-read); the pipeline upserts via scripts/push_data.py. */
 
-const APP_VERSION = "v74";
+const APP_VERSION = "v75";
 const SUPABASE_URL = "https://uhwdnmbxiopfysodydty.supabase.co";
 const SUPABASE_KEY = "sb_publishable_LEQ5_-jjcRRl2p0wlaiXcw_RX4Wf8-y";
 // Mapbox public token — a pk.* token is meant to ship to browsers, but GitHub's
@@ -320,9 +320,12 @@ async function init() {
     if (rt.axis === "close") {
       e.preventDefault();
       const y = Math.max(0, rt.dy);
+      // a touch more resistance than a 1:1 drag so the sheet has a little weight,
+      // and it stays FULLY opaque the whole time you're dragging — it only fades as
+      // it actually slides off screen (on release past the threshold), never mid-play
       reader.style.transition = "none";
-      reader.style.transform = `translateY(${y * 0.7}px)`;
-      reader.style.opacity = String(Math.max(0.35, 1 - y / 640));
+      reader.style.transform = `translateY(${y * 0.6}px)`;
+      reader.style.opacity = "1";
     }
   }, { passive: false });
   const readerTouchEnd = () => {
@@ -331,13 +334,15 @@ async function init() {
     rt = null;
     if (axis === "x" && Math.abs(dx) > 70) readerStep(dx < 0 ? 1 : -1);
     else if (axis === "close") {
-      if (dy > 130) {
-        reader.style.transition = "transform .2s ease, opacity .2s ease";
+      if (dy > 175) {
+        // committed: NOW it fades, entirely while sliding off — never before
+        reader.style.transition = "transform .22s ease, opacity .22s ease";
         reader.style.transform = "translateY(100%)";
         reader.style.opacity = "0";
-        setTimeout(() => { closeReaderNav(); reader.style.transition = ""; reader.style.transform = ""; reader.style.opacity = ""; }, 190);
+        setTimeout(() => { closeReaderNav(); reader.style.transition = ""; reader.style.transform = ""; reader.style.opacity = ""; }, 210);
       } else {
-        reader.style.transition = "transform .26s cubic-bezier(.2,.9,.25,1), opacity .26s ease";
+        // let go early → springs back with a little give (the curve overshoots a hair)
+        reader.style.transition = "transform .34s cubic-bezier(.22,1.15,.36,1), opacity .2s ease";
         reader.style.transform = ""; reader.style.opacity = "";
       }
     }
