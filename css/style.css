@@ -2156,6 +2156,27 @@ button,
 
 /* ============ Phase 5: threads, calendar, metrics ============ */
 
+.desk-links { display: flex; gap: 10px; margin: 2px 0 22px; }
+.desk-link {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--rule);
+  border-radius: 12px;
+  background: var(--box);
+  padding: 12px 14px;
+  text-decoration: none;
+  color: var(--ink);
+  -webkit-tap-highlight-color: transparent;
+}
+.desk-link:active { background: var(--rule); }
+.desk-icon { font-size: 20px; line-height: 1; }
+.desk-text { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.desk-text b { font-size: 14px; font-weight: 700; }
+.desk-text span { font-size: 11px; color: var(--ink-3); }
+.desk-arrow { color: var(--ink-3); font-size: 18px; }
+
 .page-head { margin: 4px 0 18px; }
 .page-head h2 { font-family: var(--serif); font-size: 24px; font-weight: 700; letter-spacing: -0.3px; }
 .page-head p { color: var(--ink-2); font-size: 13.5px; line-height: 1.55; margin-top: 6px; max-width: 60ch; }
@@ -2328,6 +2349,9 @@ button,
   text-decoration: none;
 }
 .reader-thread:active { background: var(--rule); }
+/* display:block above would defeat the hidden attribute — keep it hidden when
+   the story has no arc (otherwise an empty banner shows on every article) */
+.reader-thread[hidden] { display: none; }
 
 /* --- market metrics --- */
 .metric-grid {

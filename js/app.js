@@ -5,7 +5,7 @@
    History has no tab of its own — it's reached by tapping the masthead date. It still gets a hash route.
    Data lives in Supabase (public-read); the pipeline upserts via scripts/push_data.py. */
 
-const APP_VERSION = "v48";
+const APP_VERSION = "v49";
 const SUPABASE_URL = "https://uhwdnmbxiopfysodydty.supabase.co";
 const SUPABASE_KEY = "sb_publishable_LEQ5_-jjcRRl2p0wlaiXcw_RX4Wf8-y";
 
@@ -1638,6 +1638,12 @@ function renderLedgerList(priced) {
 async function renderTrends() {
   const wrap = $("trends-content");
   wrap.innerHTML = "";
+
+  // Always-present doors to the two views that have no tab of their own. Shown
+  // even when their tables are empty, so the features are discoverable (they
+  // open to a clear empty state until the pipeline fills them).
+  wrap.appendChild(deskLinks());
+
   const days = await getAllDays();
   // stories tagged with their day; newest first
   const stories = days.flatMap((d) => (d.stories || []).map((s) => ({ ...s, _date: d.date })));
@@ -4543,6 +4549,24 @@ function backLink(label, hash) {
 
 function todayISO() {
   return new Date().toLocaleDateString("en-CA"); // local YYYY-MM-DD
+}
+
+/* Two big tap targets at the top of Trends — the permanent way into Calendar and
+   Story Arcs, which have no tab of their own. */
+function deskLinks() {
+  const row = document.createElement("div");
+  row.className = "desk-links";
+  for (const [icon, label, sub, hash] of [
+    ["📅", "Calendar", "Upcoming catalysts", "#/calendar"],
+    ["🧵", "Story Arcs", "Running storylines", "#/threads"],
+  ]) {
+    const a = document.createElement("a");
+    a.className = "desk-link";
+    a.href = hash;
+    a.innerHTML = `<span class="desk-icon">${icon}</span><span class="desk-text"><b>${label}</b><span>${sub}</span></span><span class="desk-arrow">›</span>`;
+    row.appendChild(a);
+  }
+  return row;
 }
 
 /* --- Story threads (arcs) --- */
