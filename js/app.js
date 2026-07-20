@@ -5,7 +5,7 @@
    History has no tab of its own — it's reached by tapping the masthead date. It still gets a hash route.
    Data lives in Supabase (public-read); the pipeline upserts via scripts/push_data.py. */
 
-const APP_VERSION = "v61";
+const APP_VERSION = "v62";
 const SUPABASE_URL = "https://uhwdnmbxiopfysodydty.supabase.co";
 const SUPABASE_KEY = "sb_publishable_LEQ5_-jjcRRl2p0wlaiXcw_RX4Wf8-y";
 
@@ -108,6 +108,7 @@ const state = {
   events: null,        // dated catalysts (the calendar)
   metrics: null,       // cited industry figures (market metrics)
   compSort: "recent",  // comps sort: "recent" | "value" | "psf" | "punit"
+  compAsset: null,     // asset class scoping the by-market comps
   calView: "agenda",   // calendar layout: "agenda" | "month"
   calMonth: null,      // month shown in grid view (YYYY-MM)
   calDay: null,        // day selected in grid view (YYYY-MM-DD)
@@ -1834,29 +1835,165 @@ function median(arr) {
 const compPsf = (s) => (s.sizeSqft ? s.valueUsd / s.sizeSqft : null);
 const compPunit = (s) => (s.units ? s.valueUsd / s.units : null);
 
-/* Median $/sf and $/unit over the currently-filtered comps — the numbers that
-   sharpen as more sized deals accumulate. Shown as stat tiles above the list. */
-function updateCompSummary(list) {
-  const el = $("comps-summary");
-  if (!el) return;
-  el.innerHTML = "";
-  const psfs = list.map(compPsf).filter((v) => v);
-  const punits = list.map(compPunit).filter((v) => v);
-  const msf = median(psfs), mu = median(punits);
-  const tiles = [
-    ["Priced deals", String(list.length), null],
-    ["Median $/sf", msf ? "$" + Math.round(msf).toLocaleString() : "—", psfs.length],
-    ["Median $/unit", mu ? "$" + Math.round(mu).toLocaleString() : "—", punits.length],
-  ];
-  for (const [label, val, n] of tiles) {
-    const d = document.createElement("div");
-    d.className = "comp-stat";
-    const v = document.createElement("div"); v.className = "cs-val"; v.textContent = val;
-    const l = document.createElement("div"); l.className = "cs-label";
-    l.textContent = label + (n != null ? ` · n=${n}` : "");
-    d.append(v, l);
-    el.appendChild(d);
+/* ---------- The Desk: collapsible sections ---------- */
+const deskOpen = {}; // section key -> user's open/closed override
+function deskSection(key, title, count, defaultOpen, build) {
+  const open = key in deskOpen ? deskOpen[key] : defaultOpen;
+  const sec = document.createElement("div");
+  sec.className = "desk-sec";
+  const head = document.createElement("button");
+  head.type = "button";
+  head.className = "desk-sec-head" + (open ? " open" : "");
+  const t = document.createElement("span"); t.className = "ds-title"; t.textContent = title;
+  head.appendChild(t);
+  if (count != null) { const c = document.createElement("span"); c.className = "ds-count"; c.textContent = count; head.appendChild(c); }
+  const chev = document.createElement("span"); chev.className = "ds-chev"; chev.textContent = "▾";
+  head.appendChild(chev);
+  const body = document.createElement("div");
+  body.className = "desk-sec-body";
+  body.hidden = !open;
+  build(body);
+  head.addEventListener("click", () => {
+    const willOpen = body.hidden;
+    body.hidden = !willOpen;
+    head.classList.toggle("open", willOpen);
+    deskOpen[key] = willOpen;
+  });
+  sec.append(head, body);
+  return sec;
+}
+
+/* ---------- Comps, delineated by market ----------
+   A median across unlike deals in different cities and asset classes is noise.
+   A comp only means something within one market + asset class (and, once the
+   pipeline tags them, one submarket). So: group priced deals by market, show a
+   median only where a market has 3+ comparable sales, and otherwise present the
+   deals as individual reference points — never a fake market rate. */
+function buildComps(body, priced) {
+  body.innerHTML = "";
+  const note = document.createElement("p");
+  note.className = "trends-note";
+  note.textContent = "Grouped by market, because a comp only holds within one market and asset class. A median appears once a market has 3+ comparable sales; below that these are individual reference points, not a rate. Submarket-level (neighborhood) breakdown lands as the pipeline tags them, and a data feed would make it robust.";
+  body.appendChild(note);
+
+  // asset-class scope (chips) — comps are only comparable within an asset class
+  const assets = [...new Set(priced.map((s) => s.assetClass).filter(Boolean))].sort();
+  const chips = document.createElement("div");
+  chips.className = "comp-assetchips";
+  const mkChip = (label, val) => {
+    const c = document.createElement("button");
+    c.className = "comp-assetchip" + ((state.compAsset || null) === val ? " on" : "");
+    c.textContent = label;
+    c.addEventListener("click", () => { state.compAsset = val; buildComps(body, priced); });
+    return c;
+  };
+  chips.appendChild(mkChip("All assets", null));
+  for (const a of assets) chips.appendChild(mkChip(a, a));
+  body.appendChild(chips);
+
+  const scope = priced.filter((s) => !state.compAsset || s.assetClass === state.compAsset);
+  const byMarket = new Map();
+  for (const s of scope) { const k = s.market || "—"; (byMarket.get(k) || byMarket.set(k, []).get(k)).push(s); }
+  const markets = [...byMarket.entries()].sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0]));
+  if (!markets.length) {
+    const p = document.createElement("p"); p.className = "trends-note"; p.textContent = "No priced deals in this asset class yet.";
+    body.appendChild(p); return;
   }
+  const list = document.createElement("div"); list.className = "comp-markets";
+  for (const [market, deals] of markets) list.appendChild(compMarketRow(market, deals));
+  body.appendChild(list);
+}
+
+function compMarketRow(market, deals) {
+  const psfs = deals.map(compPsf).filter((v) => v);
+  const punits = deals.map(compPunit).filter((v) => v);
+  const total = deals.reduce((s, d) => s + (d.valueUsd || 0), 0);
+  const wrap = document.createElement("div"); wrap.className = "comp-market";
+  const head = document.createElement("button"); head.type = "button"; head.className = "comp-market-head";
+  const name = document.createElement("span"); name.className = "cm-name"; name.textContent = market;
+  const stat = document.createElement("span"); stat.className = "cm-stat";
+  if (punits.length >= 3) stat.innerHTML = `<b>$${Math.round(median(punits)).toLocaleString()}/unit</b> median · n=${punits.length}`;
+  else if (psfs.length >= 3) stat.innerHTML = `<b>$${Math.round(median(psfs)).toLocaleString()}/sf</b> median · n=${psfs.length}`;
+  else stat.textContent = `${deals.length} deal${deals.length === 1 ? "" : "s"} · ${fmtValue(total) || "—"}`;
+  const chev = document.createElement("span"); chev.className = "cm-chev"; chev.textContent = "▾";
+  head.append(name, stat, chev);
+  const inner = document.createElement("div"); inner.className = "comp-market-body"; inner.hidden = true;
+  for (const s of [...deals].sort((a, b) => (b.valueUsd || 0) - (a.valueUsd || 0))) inner.appendChild(ledgerRow(s));
+  head.addEventListener("click", () => { const o = inner.hidden; inner.hidden = !o; head.classList.toggle("open", o); });
+  wrap.append(head, inner);
+  return wrap;
+}
+
+function buildMetrics(body, metrics) {
+  if (!metrics.length) {
+    body.appendChild(emptyPanel("No metrics yet",
+      "As coverage cites market figures with a source — CMBS delinquency (Trepp), vacancy and rents (CBRE/JLL), price indices (Green Street) — they collect here, each tagged by geography."));
+    return;
+  }
+  const note = document.createElement("p"); note.className = "trends-note";
+  note.textContent = "Real figures the trade press cites, each tagged by geography and source. National series and market-specific prints kept distinct.";
+  body.appendChild(note);
+  const grid = document.createElement("div"); grid.className = "metric-grid";
+  for (const m of [...metrics].sort((a, b) => (b.series?.length || 0) - (a.series?.length || 0))) grid.appendChild(metricCard(m));
+  body.appendChild(grid);
+}
+
+function buildPulse(body, stories) {
+  const maxDate = stories.reduce((m, s) => (s._date > m ? s._date : m), "0000");
+  const inWin = (s, from, to) => s._date > from && s._date <= to;
+  const d7 = addDays(maxDate, -7), d14 = addDays(maxDate, -14);
+  const cur = stories.filter((s) => inWin(s, d7, maxDate));
+  const prev = stories.filter((s) => inWin(s, d14, d7));
+  const share = (l) => { const m = new Map(); for (const s of l) if (s.dealType) m.set(s.dealType, (m.get(s.dealType) || 0) + 1); return m; };
+  const curShare = share(cur), prevShare = share(prev);
+  const pulse = [...curShare.entries()].sort((a, b) => b[1] - a[1]);
+  const note = document.createElement("p"); note.className = "trends-note";
+  note.textContent = `Share of trade-press attention over the last 7 days (${cur.length} stories)${prev.length ? " — arrows vs the prior week" : ""}. Coverage, not market size.`;
+  body.appendChild(note);
+  if (!pulse.length) { const p = document.createElement("p"); p.className = "trends-note"; p.textContent = "No recent coverage."; body.appendChild(p); return; }
+  body.appendChild(hbarChart(pulse.map(([name, n]) => {
+    const pct = Math.round((n / cur.length) * 100);
+    let delta = "";
+    if (prev.length) { const pp = Math.round(((prevShare.get(name) || 0) / prev.length) * 100); delta = pct > pp ? " ▲" : pct < pp ? " ▼" : ""; }
+    return { label: typeInfo(name).emoji + " " + name, value: n, sub: `${pct}%${delta}`, color: typeInfo(name).color };
+  })));
+}
+
+function buildDistress(body, distress) {
+  const box = document.createElement("div"); box.className = "week-stories";
+  for (const s of distress) {
+    const btn = document.createElement("button"); btn.className = "week-story";
+    btn.addEventListener("click", () => { location.hash = `/story/${s._date}/${s.id}`; });
+    const h4 = document.createElement("h4"); h4.textContent = s.title;
+    const meta = document.createElement("div"); meta.className = "meta";
+    meta.textContent = [formatDate(s._date, { month: "short", day: "numeric" }), s.market, s.assetClass, fmtValue(s.valueUsd)].filter(Boolean).join(" · ");
+    btn.append(h4, meta); box.appendChild(btn);
+  }
+  body.appendChild(box);
+}
+
+function buildLedger(body, priced) {
+  const bar = document.createElement("div");
+  bar.className = "ctl-row ledger-bar";
+  bar.appendChild(makeSelect("All markets", counts(priced, "market"), state.trendFilters.market, (v) => { state.trendFilters.market = v; renderLedgerList(priced); }));
+  bar.appendChild(makeSelect("All assets", counts(priced, "assetClass"), state.trendFilters.asset, (v) => { state.trendFilters.asset = v; renderLedgerList(priced); }));
+  bar.appendChild(makeSelect("All types", counts(priced, "dealType"), state.trendFilters.type, (v) => { state.trendFilters.type = v; renderLedgerList(priced); }));
+  body.appendChild(bar);
+  const sortBar = document.createElement("div");
+  sortBar.className = "comp-sortbar";
+  for (const [key, label] of [["recent", "Newest"], ["value", "$ high"], ["psf", "$/sf"], ["punit", "$/unit"]]) {
+    const b = document.createElement("button");
+    b.className = "comp-sort" + (state.compSort === key ? " on" : "");
+    b.textContent = label;
+    b.addEventListener("click", () => { state.compSort = key; sortBar.querySelectorAll(".comp-sort").forEach((x) => x.classList.toggle("on", x === b)); renderLedgerList(priced); });
+    sortBar.appendChild(b);
+  }
+  const tally = document.createElement("span"); tally.className = "ctl-tally"; tally.id = "ledger-tally";
+  sortBar.appendChild(tally);
+  body.appendChild(sortBar);
+  const list = document.createElement("div"); list.id = "ledger-list"; list.className = "ledger-list";
+  body.appendChild(list);
+  renderLedgerList(priced);
 }
 
 function renderLedgerList(priced) {
@@ -1869,8 +2006,6 @@ function renderLedgerList(priced) {
     (!f.asset || s.assetClass === f.asset) &&
     (!f.type || s.dealType === f.type)
   );
-  updateCompSummary(filtered); // medians reflect the filter, not the sort subset
-
   // sort — $/sf and $/unit sorts also drop deals without that size
   const sort = state.compSort || "recent";
   let list = filtered;
@@ -1898,157 +2033,31 @@ async function renderTrends() {
   wrap.innerHTML = "";
 
   wrap.appendChild(pageHead("The Desk",
-    "The analytical layer — everything that sharpens as more coverage accumulates: market metrics, comps, momentum, and running arcs. Facts and medians, never coverage-biased sums."));
+    "The analytical layer. Comps are grouped by market and asset class — a median across unlike deals in different cities is noise, not a rate — and everything sharpens as coverage accumulates. Each section opens and closes."));
 
-  // Always-present doors to the two views that have no tab of their own. Shown
-  // even when their tables are empty, so the features are discoverable (they
-  // open to a clear empty state until the pipeline fills them).
+  // nav buttons to the two views with no tab (Calendar, Story Arcs) — arcs live
+  // ONLY here now, not as a duplicate list further down the page
   wrap.appendChild(deskLinks());
 
   const days = await getAllDays();
-  // stories tagged with their day; newest first
   const stories = days.flatMap((d) => (d.stories || []).map((s) => ({ ...s, _date: d.date })));
-
   if (!stories.length) {
     const p = document.createElement("p");
     p.style.cssText = "font-style:italic;color:var(--ink-2);padding:40px 0;text-align:center";
-    p.textContent = "The ledger builds as briefings accumulate.";
+    p.textContent = "The Desk fills as briefings accumulate.";
     wrap.appendChild(p);
     return;
   }
 
-  /* --- Market Metrics: industry figures the trade press cites, with sources.
-         Real series (delinquency, vacancy, rents, indices) — not story counts.
-         Leads the page: it's the hardest data here and what readers come for. --- */
-  const metrics = await getMetrics();
-  wrap.appendChild(subHead("Market Metrics", "Industry figures cited in coverage — delinquency, vacancy, rents, price indices — each with its source."));
-  if (metrics.length) {
-    const grid = document.createElement("div");
-    grid.className = "metric-grid";
-    for (const mtr of [...metrics].sort((a, b) => (b.series?.length || 0) - (a.series?.length || 0))) {
-      grid.appendChild(metricCard(mtr));
-    }
-    wrap.appendChild(grid);
-  } else {
-    wrap.appendChild(emptyPanel("No metrics yet",
-      "As coverage cites market figures with a source — office CMBS delinquency (Trepp), vacancy and rents (CBRE/JLL), price indices (Green Street) — they collect here as tracked series."));
-  }
-
-  /* --- Comps: every priced deal as a comps record, with median $/sf and $/unit
-         that sharpen as more sizes get reported. The headline analytical tool,
-         right under the metrics (was the buried 'Deal Ledger'). Sort by '$ high'
-         is the old Records list; there's no standalone Records section now. --- */
   const priced = stories.filter((s) => s.valueUsd);
-  wrap.appendChild(subHead("Comps",
-    "Every priced deal, with $/sf and $/unit where a size was reported. Medians reflect the filters and sharpen as coverage grows."));
-  const summary = document.createElement("div");
-  summary.id = "comps-summary";
-  summary.className = "comps-summary";
-  wrap.appendChild(summary);
+  const metrics = await getMetrics();
+  const distress = stories.filter((s) => s.dealType === "Distress").sort((a, b) => b._date.localeCompare(a._date));
 
-  const bar = document.createElement("div");
-  bar.className = "ctl-row ledger-bar";
-  bar.appendChild(makeSelect("All markets", counts(priced, "market"), state.trendFilters.market, (v) => { state.trendFilters.market = v; renderLedgerList(priced); }));
-  bar.appendChild(makeSelect("All assets", counts(priced, "assetClass"), state.trendFilters.asset, (v) => { state.trendFilters.asset = v; renderLedgerList(priced); }));
-  bar.appendChild(makeSelect("All types", counts(priced, "dealType"), state.trendFilters.type, (v) => { state.trendFilters.type = v; renderLedgerList(priced); }));
-  wrap.appendChild(bar);
-
-  const sortBar = document.createElement("div");
-  sortBar.className = "comp-sortbar";
-  for (const [key, label] of [["recent", "Newest"], ["value", "$ high"], ["psf", "$/sf"], ["punit", "$/unit"]]) {
-    const b = document.createElement("button");
-    b.className = "comp-sort" + (state.compSort === key ? " on" : "");
-    b.textContent = label;
-    b.addEventListener("click", () => {
-      state.compSort = key;
-      sortBar.querySelectorAll(".comp-sort").forEach((x) => x.classList.toggle("on", x === b));
-      renderLedgerList(priced);
-    });
-    sortBar.appendChild(b);
-  }
-  const tally = document.createElement("span");
-  tally.className = "ctl-tally"; tally.id = "ledger-tally";
-  sortBar.appendChild(tally);
-  wrap.appendChild(sortBar);
-
-  const clist = document.createElement("div");
-  clist.id = "ledger-list"; clist.className = "ledger-list";
-  wrap.appendChild(clist);
-  renderLedgerList(priced);
-
-  /* --- Coverage Pulse: what the trade press is paying attention to — story
-         counts as share of coverage, this week vs last. Attention, not dollars. --- */
-  const maxDate = stories.reduce((m, s) => (s._date > m ? s._date : m), "0000");
-  const inWindow = (s, from, to) => s._date > from && s._date <= to;
-  const d7 = addDays(maxDate, -7), d14 = addDays(maxDate, -14);
-  const cur = stories.filter((s) => inWindow(s, d7, maxDate));
-  const prev = stories.filter((s) => inWindow(s, d14, d7));
-  const share = (list) => {
-    const m = new Map();
-    for (const s of list) if (s.dealType) m.set(s.dealType, (m.get(s.dealType) || 0) + 1);
-    return m;
-  };
-  const curShare = share(cur), prevShare = share(prev);
-  const pulse = [...curShare.entries()].sort((a, b) => b[1] - a[1]);
-  if (pulse.length) {
-    wrap.appendChild(subHead("Coverage Pulse", `Share of trade-press attention over the last 7 days (${cur.length} stories)${prev.length ? " — arrows vs the prior week" : ""}. Measures coverage, not market size.`));
-    wrap.appendChild(hbarChart(pulse.map(([name, n]) => {
-      const pct = Math.round((n / cur.length) * 100);
-      let delta = "";
-      if (prev.length) {
-        const prevN = prevShare.get(name) || 0;
-        const prevPct = Math.round((prevN / prev.length) * 100);
-        delta = pct > prevPct ? " ▲" : pct < prevPct ? " ▼" : "";
-      }
-      return { label: typeInfo(name).emoji + " " + name, value: n, sub: `${pct}%${delta}`, color: typeInfo(name).color };
-    })));
-  }
-
-  /* --- Distress Watch: a running list of distress events — an early-warning
-         ledger, not a score. --- */
-  const distress = stories.filter((s) => s.dealType === "Distress")
-    .sort((a, b) => b._date.localeCompare(a._date));
-  if (distress.length) {
-    wrap.appendChild(subHead("Distress Watch", "Every distress event on record — defaults, foreclosures, workouts — newest first."));
-    const box = document.createElement("div");
-    box.className = "week-stories";
-    for (const s of distress) {
-      const btn = document.createElement("button");
-      btn.className = "week-story";
-      btn.addEventListener("click", () => { location.hash = `/story/${s._date}/${s.id}`; });
-      const h4 = document.createElement("h4");
-      h4.textContent = s.title;
-      const meta = document.createElement("div");
-      meta.className = "meta";
-      meta.textContent = [formatDate(s._date, { month: "short", day: "numeric" }), s.market, s.assetClass, fmtValue(s.valueUsd)].filter(Boolean).join(" · ");
-      btn.append(h4, meta);
-      box.appendChild(btn);
-    }
-    wrap.appendChild(box);
-  }
-
-  /* --- Story Arcs: a peek at running threads, with a link to the full set. --- */
-  const arcs = await getThreads();
-  if (arcs.length) {
-    wrap.appendChild(subHead("Story Arcs", "Running storylines linked by a concrete shared spine — same property, deal, case, or company event."));
-    const arcList = document.createElement("div");
-    arcList.className = "thread-list";
-    const byRecent = [...arcs].sort((a, b) => {
-      const ar = a.status === "resolved" ? 1 : 0, br = b.status === "resolved" ? 1 : 0;
-      if (ar !== br) return ar - br;
-      return (b.lastSeen || "").localeCompare(a.lastSeen || "");
-    });
-    for (const t of byRecent.slice(0, 4)) arcList.appendChild(threadCard(t));
-    wrap.appendChild(arcList);
-    if (arcs.length > 4) {
-      const more = document.createElement("a");
-      more.className = "see-all";
-      more.href = "#/threads";
-      more.textContent = `All ${arcs.length} story arcs →`;
-      wrap.appendChild(more);
-    }
-  }
-
+  wrap.appendChild(deskSection("comps", "Comps — by market", null, true, (b) => buildComps(b, priced)));
+  wrap.appendChild(deskSection("metrics", "Market Metrics", metrics.length || null, true, (b) => buildMetrics(b, metrics)));
+  wrap.appendChild(deskSection("pulse", "Coverage Pulse", null, false, (b) => buildPulse(b, stories)));
+  if (distress.length) wrap.appendChild(deskSection("distress", "Distress Watch", distress.length, false, (b) => buildDistress(b, distress)));
+  wrap.appendChild(deskSection("ledger", "All priced deals", priced.length, false, (b) => buildLedger(b, priced)));
 }
 
 /* ---------- players ---------- */
@@ -5360,6 +5369,13 @@ function metricCard(m) {
   card.className = "metric-card";
   const series = [...(m.series || [])].sort((a, b) => (a.asOf || "").localeCompare(b.asOf || ""));
   const last = series[series.length - 1];
+
+  // geography chip up top — makes explicit whether it's a national series or a
+  // market-specific print, so a metric never masquerades as market-agnostic
+  const geo = document.createElement("div");
+  geo.className = "metric-geo";
+  geo.textContent = m.geography || "National";
+  card.appendChild(geo);
 
   const top = document.createElement("div");
   top.className = "metric-top";
