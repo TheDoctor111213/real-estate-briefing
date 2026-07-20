@@ -5,7 +5,7 @@
    History has no tab of its own — it's reached by tapping the masthead date. It still gets a hash route.
    Data lives in Supabase (public-read); the pipeline upserts via scripts/push_data.py. */
 
-const APP_VERSION = "v63";
+const APP_VERSION = "v64";
 const SUPABASE_URL = "https://uhwdnmbxiopfysodydty.supabase.co";
 const SUPABASE_KEY = "sb_publishable_LEQ5_-jjcRRl2p0wlaiXcw_RX4Wf8-y";
 
@@ -109,6 +109,7 @@ const state = {
   metrics: null,       // cited industry figures (market metrics)
   compSort: "recent",  // comps sort: "recent" | "value" | "psf" | "punit"
   compAsset: null,     // asset class scoping the by-market comps
+  capAsset: null,      // asset class scoping the by-market cap rates
   calView: "agenda",   // calendar layout: "agenda" | "month"
   calMonth: null,      // month shown in grid view (YYYY-MM)
   calDay: null,        // day selected in grid view (YYYY-MM-DD)
@@ -1924,6 +1925,87 @@ function compMarketRow(market, deals) {
   return wrap;
 }
 
+/* ---------- Cap rates, by market ----------
+   The purest read on what a market is pricing. Taken straight from coverage when
+   a deal's cap rate is published, or computed as NOI ÷ price when both are given
+   (derived). Grouped by market + asset like the comps, median only at n≥3. */
+function capRateOf(s) {
+  if (typeof s.capRate === "number" && s.capRate > 0) return { v: s.capRate, derived: false };
+  if (s.noi && s.valueUsd) return { v: (s.noi / s.valueUsd) * 100, derived: true };
+  return null;
+}
+
+function buildCapRates(body, stories) {
+  body.innerHTML = "";
+  const note = document.createElement("p");
+  note.className = "trends-note";
+  note.textContent = "Deal cap rates by market — published rates when coverage gives them, or NOI ÷ price when both are stated (derived). A median appears at 3+ per market; below that they're reference points. The single clearest gauge of what a market is pricing.";
+  body.appendChild(note);
+
+  const withCap = stories.map((s) => ({ s, cap: capRateOf(s) })).filter((x) => x.cap);
+  if (!withCap.length) {
+    body.appendChild(emptyPanel("No cap rates yet",
+      "As coverage publishes a deal's cap rate — or its NOI and price (we compute the rate) — they collect here by market. Cap rates are cited constantly in CRE deal coverage, so this fills fast."));
+    return;
+  }
+  const assets = [...new Set(withCap.map((x) => x.s.assetClass).filter(Boolean))].sort();
+  const chips = document.createElement("div");
+  chips.className = "comp-assetchips";
+  const mkChip = (label, val) => {
+    const c = document.createElement("button");
+    c.className = "comp-assetchip" + ((state.capAsset || null) === val ? " on" : "");
+    c.textContent = label;
+    c.addEventListener("click", () => { state.capAsset = val; buildCapRates(body, stories); });
+    return c;
+  };
+  chips.appendChild(mkChip("All assets", null));
+  for (const a of assets) chips.appendChild(mkChip(a, a));
+  body.appendChild(chips);
+
+  const scope = withCap.filter((x) => !state.capAsset || x.s.assetClass === state.capAsset);
+  const byMarket = new Map();
+  for (const x of scope) { const k = x.s.market || "—"; (byMarket.get(k) || byMarket.set(k, []).get(k)).push(x); }
+  const markets = [...byMarket.entries()].sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0]));
+  const list = document.createElement("div");
+  list.className = "comp-markets";
+  for (const [market, obs] of markets) list.appendChild(capRateMarketRow(market, obs));
+  body.appendChild(list);
+}
+
+function capRateMarketRow(market, obs) {
+  const rates = obs.map((o) => o.cap.v);
+  const wrap = document.createElement("div"); wrap.className = "comp-market";
+  const head = document.createElement("button"); head.type = "button"; head.className = "comp-market-head";
+  const name = document.createElement("span"); name.className = "cm-name"; name.textContent = market;
+  const stat = document.createElement("span"); stat.className = "cm-stat";
+  if (rates.length >= 3) stat.innerHTML = `<b>${median(rates).toFixed(1)}%</b> median cap · n=${rates.length}`;
+  else stat.textContent = `${obs.length} cap rate${obs.length === 1 ? "" : "s"}`;
+  const chev = document.createElement("span"); chev.className = "cm-chev"; chev.textContent = "▾";
+  head.append(name, stat, chev);
+  const inner = document.createElement("div"); inner.className = "comp-market-body"; inner.hidden = true;
+  for (const o of [...obs].sort((a, b) => a.cap.v - b.cap.v)) inner.appendChild(capObsRow(o));
+  head.addEventListener("click", () => { const o = inner.hidden; inner.hidden = !o; head.classList.toggle("open", o); });
+  wrap.append(head, inner);
+  return wrap;
+}
+
+function capObsRow({ s, cap }) {
+  const el = document.createElement("button");
+  el.className = "ledger-row";
+  el.addEventListener("click", () => { location.hash = `/story/${s._date}/${s.id}`; });
+  const main = document.createElement("div"); main.className = "lr-main";
+  const t = document.createElement("div"); t.className = "lr-title"; t.textContent = s.title;
+  const m = document.createElement("div"); m.className = "lr-meta";
+  m.textContent = [formatDate(s._date, { month: "short", day: "numeric" }), s.market, s.assetClass, fmtValue(s.valueUsd)].filter(Boolean).join(" · ");
+  main.append(t, m);
+  const price = document.createElement("div"); price.className = "lr-price";
+  const v = document.createElement("div"); v.className = "lr-val"; v.textContent = cap.v.toFixed(1) + "%";
+  const p = document.createElement("div"); p.className = "lr-per"; p.textContent = cap.derived ? "derived" : "stated";
+  price.append(v, p);
+  el.append(main, price);
+  return el;
+}
+
 function buildMetrics(body, metrics) {
   if (!metrics.length) {
     body.appendChild(emptyPanel("No metrics yet",
@@ -2054,9 +2136,10 @@ async function renderTrends() {
   const distress = stories.filter((s) => s.dealType === "Distress").sort((a, b) => b._date.localeCompare(a._date));
 
   wrap.appendChild(deskSection("comps", "Comps — by market", null, true, (b) => buildComps(b, priced)));
+  wrap.appendChild(deskSection("caprates", "Cap Rates — by market", null, true, (b) => buildCapRates(b, stories)));
   wrap.appendChild(deskSection("metrics", "Market Metrics", metrics.length || null, true, (b) => buildMetrics(b, metrics)));
-  wrap.appendChild(deskSection("pulse", "Coverage Pulse", null, false, (b) => buildPulse(b, stories)));
   if (distress.length) wrap.appendChild(deskSection("distress", "Distress Watch", distress.length, false, (b) => buildDistress(b, distress)));
+  wrap.appendChild(deskSection("pulse", "Coverage Pulse", null, false, (b) => buildPulse(b, stories)));
   wrap.appendChild(deskSection("ledger", "All priced deals", priced.length, false, (b) => buildLedger(b, priced)));
 }
 
