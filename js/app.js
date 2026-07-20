@@ -1,10 +1,11 @@
 /* Real Estate Briefing — views: briefing / map / weekly / players / dictionary / history / rates, plus reader overlay.
    Hash routes: #/ · #/day/DATE · #/story/DATE/ID · #/map · #/weekly · #/players · #/player/SLUG ·
-                #/dictionary · #/term/SLUG · #/history · #/rates
+                #/dictionary · #/term/SLUG · #/history · #/rates · #/trends ·
+                #/threads · #/thread/SLUG · #/calendar (Phase 5, no tab — reached from reader/Trends/watch)
    History has no tab of its own — it's reached by tapping the masthead date. It still gets a hash route.
    Data lives in Supabase (public-read); the pipeline upserts via scripts/push_data.py. */
 
-const APP_VERSION = "v46";
+const APP_VERSION = "v47";
 const SUPABASE_URL = "https://uhwdnmbxiopfysodydty.supabase.co";
 const SUPABASE_KEY = "sb_publishable_LEQ5_-jjcRRl2p0wlaiXcw_RX4Wf8-y";
 
@@ -100,6 +101,9 @@ const state = {
   histRange: "3M",     // "1M" | "3M" | "6M" | "1Y"
   fwdHorizon: "1Y",    // forward-view horizon: "30D" | "90D" | "6M" | "1Y" | "3Y" | "5Y"
   allDays: null,       // every day's data, loaded once for Search + Trends
+  threads: null,       // story arcs (cross-day timelines)
+  events: null,        // dated catalysts (the calendar)
+  metrics: null,       // cited industry figures (market metrics)
   trendFilters: { market: null, asset: null, type: null }, // Deal Ledger filters
   searchQuery: "",
   reader: null,        // { story, date } currently open in the reader
@@ -344,6 +348,37 @@ async function getAllDays() {
   return state.allDays;
 }
 
+/* The three deep-data registries the pipeline maintains (steps 10b–10d). Each is
+   a whole table fetched once and cached; cleared on refresh like the rest. They
+   stay empty until the pipeline has qualifying content, so every render guards
+   for []. */
+async function getThreads() {
+  if (state.threads) return state.threads;
+  try {
+    const rows = await sb("threads?select=slug,data");
+    state.threads = rows.map((r) => ({ slug: r.slug, ...(r.data || {}) }));
+  } catch { state.threads = []; }
+  return state.threads;
+}
+
+async function getEvents() {
+  if (state.events) return state.events;
+  try {
+    const rows = await sb("events?select=id,data");
+    state.events = rows.map((r) => ({ id: r.id, ...(r.data || {}) }));
+  } catch { state.events = []; }
+  return state.events;
+}
+
+async function getMetrics() {
+  if (state.metrics) return state.metrics;
+  try {
+    const rows = await sb("metrics?select=id,data");
+    state.metrics = rows.map((r) => ({ id: r.id, ...(r.data || {}) }));
+  } catch { state.metrics = []; }
+  return state.metrics;
+}
+
 async function getWeek(weekOf) {
   if (!weekOf) return null;
   if (state.weeksData.has(weekOf)) return state.weeksData.get(weekOf);
@@ -377,6 +412,9 @@ async function refreshData(silent, manual) {
     state.players = null; // roster refetches next time the Players view opens
     state.terms = null;   // dictionary refetches next time the Dictionary view opens
     state.allDays = null; // Search/Trends corpus refetches on next open
+    state.threads = null; // arcs/calendar/metrics refetch on next open
+    state.events = null;
+    state.metrics = null;
 
     const fresh = target ? await getDay(target) : null;
     state.currentDate = target;
@@ -476,6 +514,15 @@ function route() {
   } else if (h === "#/alerts") {
     showView("alerts");
     renderAlerts();
+  } else if ((m = h.match(/^#\/thread\/([\w-]+)$/))) {
+    showView("threads");
+    renderThread(m[1]);
+  } else if (h === "#/threads") {
+    showView("threads");
+    renderThreads();
+  } else if (h === "#/calendar") {
+    showView("calendar");
+    renderCalendar();
   } else if (h === "#/trends") {
     showView("trends");
     renderTrends();
@@ -576,6 +623,11 @@ async function renderBriefing(date) {
     }
     linkifyElement(list);
     watch.appendChild(list);
+    const cal = document.createElement("a");
+    cal.className = "watch-cal";
+    cal.href = "#/calendar";
+    cal.textContent = "Full calendar →";
+    watch.appendChild(cal);
   }
 
   if (state.controlsDate !== date) {
@@ -1668,6 +1720,41 @@ async function renderTrends() {
       box.appendChild(btn);
     }
     wrap.appendChild(box);
+  }
+
+  /* --- Market Metrics: industry figures the trade press cites, with sources.
+         Real series (delinquency, vacancy, rents, indices) — not story counts. --- */
+  const metrics = await getMetrics();
+  if (metrics.length) {
+    wrap.appendChild(subHead("Market Metrics", "Industry figures cited in coverage — delinquency, vacancy, rents, price indices — each with its source."));
+    const grid = document.createElement("div");
+    grid.className = "metric-grid";
+    for (const mtr of [...metrics].sort((a, b) => (b.series?.length || 0) - (a.series?.length || 0))) {
+      grid.appendChild(metricCard(mtr));
+    }
+    wrap.appendChild(grid);
+  }
+
+  /* --- Story Arcs: a peek at running threads, with a link to the full set. --- */
+  const arcs = await getThreads();
+  if (arcs.length) {
+    wrap.appendChild(subHead("Story Arcs", "Running storylines linked by a concrete shared spine — same property, deal, case, or company event."));
+    const arcList = document.createElement("div");
+    arcList.className = "thread-list";
+    const byRecent = [...arcs].sort((a, b) => {
+      const ar = a.status === "resolved" ? 1 : 0, br = b.status === "resolved" ? 1 : 0;
+      if (ar !== br) return ar - br;
+      return (b.lastSeen || "").localeCompare(a.lastSeen || "");
+    });
+    for (const t of byRecent.slice(0, 4)) arcList.appendChild(threadCard(t));
+    wrap.appendChild(arcList);
+    if (arcs.length > 4) {
+      const more = document.createElement("a");
+      more.className = "see-all";
+      more.href = "#/threads";
+      more.textContent = `All ${arcs.length} story arcs →`;
+      wrap.appendChild(more);
+    }
   }
 
   /* --- Deal Ledger: every priced transaction, as reported. Facts, no sums.
@@ -3070,6 +3157,20 @@ async function openReaderRoute(date, id) {
   paintSave();
   saveBtn.onclick = () => { const now = toggleSaved(story, date); paintSave(); flashToast(now ? "Saved" : "Removed"); };
 
+  // arc banner: if this story belongs to a registered thread, offer its timeline
+  const threadEl = $("reader-thread");
+  threadEl.hidden = true;
+  if (story.thread) {
+    getThreads().then((threads) => {
+      const t = threads.find((x) => x.slug === story.thread);
+      if (!t || !state.reader || state.reader.story.id !== story.id) return; // reader moved on
+      const n = (t.entries || []).length;
+      threadEl.textContent = `🧵 Part of an arc — ${t.title} · ${n} ${n === 1 ? "story" : "stories"} →`;
+      threadEl.href = `#/thread/${t.slug}`;
+      threadEl.hidden = false;
+    });
+  }
+
   // swipe/keyboard navigation context + progress + the next-up card
   state.readerNav = buildReaderNav(day, story);
   renderReaderProgress();
@@ -4401,6 +4502,321 @@ function fmtAge(min) {
   return `${Math.round(min / 1440)} d ago`;
 }
 
+/* ---------- Phase 5: story threads, calendar, market metrics ----------
+   Three surfaces over the pipeline's deep-data registries (CLAUDE.md 10b–10d).
+   No new tab — reached like History/Status: from the reader (arc banner), the
+   Trends page (arcs + metrics), and the briefing/alerts (calendar). Every render
+   guards for [] because the tables stay empty until there's qualifying content. */
+
+function pageHead(title, sub) {
+  const head = document.createElement("div");
+  head.className = "page-head";
+  const h = document.createElement("h2");
+  h.textContent = title;
+  head.appendChild(h);
+  if (sub) {
+    const p = document.createElement("p");
+    p.textContent = sub;
+    head.appendChild(p);
+  }
+  return head;
+}
+
+function emptyPanel(title, msg) {
+  const wrap = document.createElement("div");
+  wrap.className = "panel-empty";
+  const h = document.createElement("h3");
+  h.textContent = title;
+  const p = document.createElement("p");
+  p.textContent = msg;
+  wrap.append(h, p);
+  return wrap;
+}
+
+function backLink(label, hash) {
+  const a = document.createElement("a");
+  a.className = "back-link";
+  a.href = hash;
+  a.textContent = "‹ " + label;
+  return a;
+}
+
+function todayISO() {
+  return new Date().toLocaleDateString("en-CA"); // local YYYY-MM-DD
+}
+
+/* --- Story threads (arcs) --- */
+async function renderThreads() {
+  const wrap = $("threads-content");
+  wrap.innerHTML = "";
+  wrap.appendChild(pageHead("Story Arcs",
+    "Running storylines the briefing is tracking. Each links stories by a concrete shared spine — the same property, deal, lawsuit, or company event — never a vague theme."));
+  const threads = await getThreads();
+  if (!threads.length) {
+    wrap.appendChild(emptyPanel("No arcs yet",
+      "When two or more stories share a concrete anchor — the same building, deal, case, or company event — they connect into a timeline here."));
+    return;
+  }
+  const sorted = [...threads].sort((a, b) => {
+    const ar = a.status === "resolved" ? 1 : 0, br = b.status === "resolved" ? 1 : 0;
+    if (ar !== br) return ar - br;                 // active before resolved
+    return (b.lastSeen || "").localeCompare(a.lastSeen || "");
+  });
+  const list = document.createElement("div");
+  list.className = "thread-list";
+  for (const t of sorted) list.appendChild(threadCard(t));
+  wrap.appendChild(list);
+}
+
+function threadCard(t) {
+  const btn = document.createElement("button");
+  btn.className = "thread-card";
+  btn.addEventListener("click", () => { location.hash = `/thread/${t.slug}`; });
+  const top = document.createElement("div");
+  top.className = "thread-card-top";
+  const h = document.createElement("h3");
+  h.textContent = t.title || t.slug;
+  const st = document.createElement("span");
+  st.className = "thread-status " + (t.status === "resolved" ? "resolved" : "active");
+  st.textContent = t.status === "resolved" ? "Resolved" : "Active";
+  top.append(h, st);
+  const anchor = document.createElement("p");
+  anchor.className = "thread-anchor";
+  anchor.textContent = t.anchor || "";
+  const meta = document.createElement("p");
+  meta.className = "thread-meta";
+  const n = (t.entries || []).length;
+  meta.textContent = `${n} ${n === 1 ? "story" : "stories"}` +
+    (t.lastSeen ? " · updated " + formatDate(t.lastSeen, { month: "short", day: "numeric" }) : "");
+  btn.append(top, anchor, meta);
+  return btn;
+}
+
+async function renderThread(slug) {
+  const wrap = $("threads-content");
+  wrap.innerHTML = "";
+  wrap.appendChild(backLink("All arcs", "#/threads"));
+  const threads = await getThreads();
+  const t = threads.find((x) => x.slug === slug);
+  if (!t) { wrap.appendChild(emptyPanel("Arc not found", "This storyline isn't on record.")); return; }
+
+  const head = document.createElement("div");
+  head.className = "thread-head";
+  const h = document.createElement("h2");
+  h.textContent = t.title || slug;
+  const st = document.createElement("span");
+  st.className = "thread-status " + (t.status === "resolved" ? "resolved" : "active");
+  st.textContent = t.status === "resolved" ? "Resolved" : "Active";
+  head.append(h, st);
+  wrap.appendChild(head);
+  if (t.anchor) {
+    const a = document.createElement("p");
+    a.className = "thread-anchor big";
+    a.textContent = t.anchor;
+    wrap.appendChild(a);
+  }
+
+  // entries are stored newest-first; a timeline reads oldest → newest
+  const entries = [...(t.entries || [])].sort((a, b) => (a.date || "").localeCompare(b.date || ""));
+  const tl = document.createElement("div");
+  tl.className = "timeline";
+  for (const e of entries) {
+    const row = document.createElement("button");
+    row.className = "timeline-row";
+    row.addEventListener("click", () => { location.hash = `/story/${e.date}/${e.id}`; });
+    const dot = document.createElement("div");
+    dot.className = "tl-dot";
+    const body = document.createElement("div");
+    body.className = "tl-body";
+    const d = document.createElement("div");
+    d.className = "tl-date";
+    d.textContent = formatDate(e.date, { month: "short", day: "numeric", year: "numeric" });
+    const ti = document.createElement("div");
+    ti.className = "tl-title";
+    ti.textContent = e.title;
+    body.append(d, ti);
+    if (e.delta) {
+      const dl = document.createElement("div");
+      dl.className = "tl-delta";
+      dl.textContent = e.delta;
+      body.appendChild(dl);
+    }
+    if (e.why) {
+      const w = document.createElement("div");
+      w.className = "tl-why";
+      w.textContent = e.why;
+      body.appendChild(w);
+    }
+    row.append(dot, body);
+    tl.appendChild(row);
+  }
+  wrap.appendChild(tl);
+}
+
+/* --- Calendar (dated catalysts) --- */
+const EVENT_ICON = { auction: "🔨", court: "⚖️", policy: "🏛️", fed: "🏦", data: "📊", deadline: "⏳", opening: "🏗️", other: "📌" };
+
+async function renderCalendar() {
+  const wrap = $("calendar-content");
+  wrap.innerHTML = "";
+  wrap.appendChild(pageHead("Calendar",
+    "Dated catalysts pulled from the briefing — auctions, court dates, policy deadlines, Fed decisions. Star one to be reminded the morning it lands."));
+  const events = await getEvents();
+  if (!events.length) {
+    wrap.appendChild(emptyPanel("Nothing scheduled yet",
+      "As stories name concrete dated events, they gather here as an agenda you can star for reminders."));
+    return;
+  }
+  const today = todayISO();
+  const upcoming = events.filter((e) => (e.date || "") >= today)
+    .sort((a, b) => (a.date || "").localeCompare(b.date || ""));
+  const past = events.filter((e) => (e.date || "") < today)
+    .sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+
+  if (upcoming.length) {
+    wrap.appendChild(subHead("Upcoming", null));
+    const g = document.createElement("div");
+    g.className = "cal-list";
+    for (const e of upcoming) g.appendChild(eventRow(e, false));
+    wrap.appendChild(g);
+  }
+  if (past.length) {
+    wrap.appendChild(subHead("Passed", null));
+    const g = document.createElement("div");
+    g.className = "cal-list";
+    for (const e of past.slice(0, 40)) g.appendChild(eventRow(e, true));
+    wrap.appendChild(g);
+  }
+}
+
+function eventRow(e, isPast) {
+  const row = document.createElement("div");
+  row.className = "cal-row" + (isPast ? " past" : "");
+  const date = document.createElement("div");
+  date.className = "cal-date";
+  const mo = document.createElement("div");
+  mo.className = "cal-mo";
+  mo.textContent = formatDate(e.date, { month: "short" });
+  const dd = document.createElement("div");
+  dd.className = "cal-dd";
+  dd.textContent = formatDate(e.date, { day: "numeric" });
+  date.append(mo, dd);
+
+  const body = document.createElement("div");
+  body.className = "cal-body";
+  const t = document.createElement("div");
+  t.className = "cal-title";
+  t.textContent = (EVENT_ICON[e.type] || "📌") + " " + (e.title || "");
+  body.appendChild(t);
+  const bits = [];
+  if (e.market && e.market !== "National") bits.push(e.market);
+  if (e.approx === "month") bits.push("date approx.");
+  if (bits.length) {
+    const m = document.createElement("div");
+    m.className = "cal-meta";
+    m.textContent = bits.join(" · ");
+    body.appendChild(m);
+  }
+  if (e.resolvedBy?.outcome) {
+    const r = document.createElement("div");
+    r.className = "cal-outcome";
+    r.textContent = "✓ " + e.resolvedBy.outcome;
+    body.appendChild(r);
+  }
+  row.append(date, body);
+
+  // star to opt into a morning-of reminder (push-dispatch reads starEvents)
+  if (!isPast && !e.resolvedBy) {
+    const star = document.createElement("button");
+    star.className = "cal-star";
+    const paint = () => {
+      const on = (pref("starEvents", []) || []).includes(e.id);
+      star.textContent = on ? "★" : "☆";
+      star.classList.toggle("on", on);
+      star.setAttribute("aria-label", on ? "Starred — tap to remove" : "Star for a reminder");
+    };
+    paint();
+    star.addEventListener("click", () => {
+      const cur = new Set(pref("starEvents", []) || []);
+      if (cur.has(e.id)) cur.delete(e.id); else cur.add(e.id);
+      setPref("starEvents", [...cur]);
+      paint();
+      flashToast(cur.has(e.id) ? "Starred — you'll get a reminder" : "Reminder removed");
+    });
+    row.appendChild(star);
+  }
+  return row;
+}
+
+/* --- Market metrics (cards + sparkline) --- */
+function fmtMetric(v, unit) {
+  if (unit === "%") return (Math.round(v * 100) / 100) + "%";
+  if (unit === "bps") return v + " bps";
+  if (unit === "$") return fmtValue(v) || ("$" + v);
+  return String(v);
+}
+
+function metricCard(m) {
+  const card = document.createElement("div");
+  card.className = "metric-card";
+  const series = [...(m.series || [])].sort((a, b) => (a.asOf || "").localeCompare(b.asOf || ""));
+  const last = series[series.length - 1];
+
+  const top = document.createElement("div");
+  top.className = "metric-top";
+  const name = document.createElement("div");
+  name.className = "metric-name";
+  name.textContent = m.name || m.id;
+  const val = document.createElement("div");
+  val.className = "metric-val";
+  val.textContent = last ? fmtMetric(last.value, m.unit) : "—";
+  if (series.length >= 2) {
+    const d = last.value - series[series.length - 2].value;
+    if (d !== 0) {
+      const del = document.createElement("span");
+      del.className = "metric-delta " + (d > 0 ? "up" : "down");
+      del.textContent = (d > 0 ? " ▲" : " ▼");
+      val.appendChild(del);
+    }
+  }
+  top.append(name, val);
+  card.appendChild(top);
+
+  if (series.length >= 2) card.appendChild(sparkline(series.map((s) => s.value)));
+
+  const meta = document.createElement("div");
+  meta.className = "metric-meta";
+  const bits = [];
+  if (m.geography && m.geography !== "National") bits.push(m.geography);
+  if (last?.source) bits.push("per " + last.source);
+  if (last?.asOf) bits.push(formatDate(last.asOf, { month: "short", year: "numeric" }));
+  meta.textContent = bits.join(" · ");
+  card.appendChild(meta);
+  return card;
+}
+
+function sparkline(values) {
+  const w = 132, h = 34, pad = 3;
+  const min = Math.min(...values), max = Math.max(...values), span = max - min || 1;
+  const step = (w - pad * 2) / Math.max(1, values.length - 1);
+  const pts = values.map((v, i) =>
+    `${(pad + i * step).toFixed(1)},${(pad + (1 - (v - min) / span) * (h - pad * 2)).toFixed(1)}`);
+  const NS = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(NS, "svg");
+  svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
+  svg.setAttribute("class", "sparkline");
+  svg.setAttribute("preserveAspectRatio", "none");
+  const poly = document.createElementNS(NS, "polyline");
+  poly.setAttribute("points", pts.join(" "));
+  poly.setAttribute("fill", "none");
+  poly.setAttribute("stroke", "currentColor");
+  poly.setAttribute("stroke-width", "1.5");
+  poly.setAttribute("stroke-linecap", "round");
+  poly.setAttribute("stroke-linejoin", "round");
+  svg.appendChild(poly);
+  return svg;
+}
+
 async function renderStatus() {
   const wrap = $("status-content");
   wrap.innerHTML = "";
@@ -4715,7 +5131,12 @@ async function renderAlerts() {
     n.ready === true, (v) => setPref("notifications", { ...pref("notifications", {}), ready: v }));
   const evNote = document.createElement("p");
   evNote.className = "status-note";
-  evNote.textContent = "Starred calendar events remind you the morning they happen — starring is the opt-in.";
+  evNote.innerHTML = "Starred calendar events remind you the morning they happen — starring is the opt-in. ";
+  const calLink = document.createElement("a");
+  calLink.href = "#/calendar";
+  calLink.className = "inline-link";
+  calLink.textContent = "Open the calendar →";
+  evNote.appendChild(calLink);
   sendCard.appendChild(evNote);
   wrap.appendChild(sendCard);
 

@@ -8,13 +8,13 @@
   <title>Real Estate Briefing</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🗞️</text></svg>">
   <!-- installable PWA: manifest + iOS home-screen chrome; sw.js caches the app shell for offline -->
-  <link rel="manifest" href="manifest.webmanifest?v=46">
+  <link rel="manifest" href="manifest.webmanifest?v=47">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="Briefing">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
   <!-- bump ?v= on every deploy so cached pages can never pair old code with new data -->
-  <link rel="stylesheet" href="css/style.css?v=46">
+  <link rel="stylesheet" href="css/style.css?v=47">
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" defer></script>
 </head>
 <body>
@@ -146,6 +146,16 @@
     <section id="view-alerts" class="view" hidden>
       <div id="alerts-content"></div>
     </section>
+
+    <!-- Threads: cross-day story arcs (index + a single arc's timeline) -->
+    <section id="view-threads" class="view" hidden>
+      <div id="threads-content"></div>
+    </section>
+
+    <!-- Calendar: upcoming dated catalysts from the events registry -->
+    <section id="view-calendar" class="view" hidden>
+      <div id="calendar-content"></div>
+    </section>
   </main>
 
   <!-- Reader overlay -->
@@ -170,6 +180,7 @@
       <p class="reader-kicker" id="reader-kicker"></p>
       <h1 id="reader-title"></h1>
       <p class="reader-meta" id="reader-meta"></p>
+      <a class="reader-thread" id="reader-thread" href="#" hidden></a>
       <figure class="reader-hero" id="reader-hero" hidden><img id="reader-hero-img" alt=""></figure>
       <div class="reader-body" id="reader-body"></div>
       <aside class="reader-explainer" id="reader-explainer" hidden></aside>
@@ -208,11 +219,11 @@
 
   <div id="toast" role="status"></div>
 
-  <script src="js/app.js?v=46"></script>
+  <script src="js/app.js?v=47"></script>
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', function () {
-        navigator.serviceWorker.register('sw.js?v=46').catch(function () {});
+        navigator.serviceWorker.register('sw.js?v=47').catch(function () {});
       });
     }
   </script>
