@@ -5,7 +5,7 @@
    History has no tab of its own — it's reached by tapping the masthead date. It still gets a hash route.
    Data lives in Supabase (public-read); the pipeline upserts via scripts/push_data.py. */
 
-const APP_VERSION = "v51";
+const APP_VERSION = "v52";
 const SUPABASE_URL = "https://uhwdnmbxiopfysodydty.supabase.co";
 const SUPABASE_KEY = "sb_publishable_LEQ5_-jjcRRl2p0wlaiXcw_RX4Wf8-y";
 
@@ -4779,7 +4779,8 @@ function eventRow(e, isPast) {
 function fmtMetric(v, unit) {
   if (unit === "%") return (Math.round(v * 100) / 100) + "%";
   if (unit === "bps") return v + " bps";
-  if (unit === "$") return fmtValue(v) || ("$" + v);
+  // big dollars (home prices) abbreviate to $M/$B; small ones (rents) stay exact
+  if (unit === "$") return v >= 1e6 ? fmtValue(v) : "$" + Math.round(v).toLocaleString();
   return String(v);
 }
 
