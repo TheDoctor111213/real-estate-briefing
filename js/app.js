@@ -5,7 +5,7 @@
    History has no tab of its own — it's reached by tapping the masthead date. It still gets a hash route.
    Data lives in Supabase (public-read); the pipeline upserts via scripts/push_data.py. */
 
-const APP_VERSION = "v77";
+const APP_VERSION = "v78";
 const SUPABASE_URL = "https://uhwdnmbxiopfysodydty.supabase.co";
 const SUPABASE_KEY = "sb_publishable_LEQ5_-jjcRRl2p0wlaiXcw_RX4Wf8-y";
 // Mapbox public token — a pk.* token is meant to ship to browsers, but GitHub's
@@ -705,10 +705,23 @@ function formatDate(iso, opts) {
 
 /* ---------- routing ---------- */
 
+// glide an element (a just-opened chart, sitting higher up the page) into view —
+// a gentle smooth scroll, never the abrupt jump-to-top a full re-render caused.
+// The small top gap comes from CSS scroll-margin-top on the panels.
+function smoothScrollIntoView(el) {
+  el.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+let lastRouteHash = null;
 function route() {
   const sheet = $("sheet");
   if (sheet && !sheet.hidden) closeSheet(); // a route change always drops the sheet
   const h = location.hash;
+  // a re-render of the SAME view (opening a chart, an auto-refresh, a filter) must
+  // hold your scroll position; only a real navigation to a different view resets it
+  const sameView = h === lastRouteHash;
+  const keepY = window.scrollY;
+  lastRouteHash = h;
   let m;
   if ((m = h.match(/^#\/story\/(\d{4}-\d{2}-\d{2})\/(.+)$/))) {
     openReaderRoute(m[1], m[2]);
@@ -773,6 +786,12 @@ function route() {
     showView("briefing");
     renderBriefing(state.currentDate);
   }
+  // scroll policy: jump to top only on a real navigation. On a same-view re-render
+  // hold position — UNLESS a chart is opening, in which case it will smooth-scroll
+  // itself into view (so we must not fight it by restoring the old position).
+  const chartOpening = state.pulseChartScroll || state.marketChartScroll;
+  if (!sameView) window.scrollTo(0, 0);
+  else if (!chartOpening) requestAnimationFrame(() => window.scrollTo(0, keepY));
 }
 
 function showView(name) {
@@ -784,7 +803,7 @@ function showView(name) {
   $("date-nav").classList.toggle("off", name !== "briefing");
   // the masthead ticker is redundant on the Rates page itself
   $("rate-strip").classList.toggle("off", name === "rates");
-  window.scrollTo(0, 0);
+  // (scroll is handled in route(): reset on navigation, preserved on re-render)
 }
 
 function stepDay(delta) {
@@ -2625,9 +2644,17 @@ function buildMarketPulse(wrap, pulse, metrics = []) {
   vb.innerHTML = `<span class="pv-kicker">The read</span><p class="pv-text">${verdict.text}</p>`;
   wrap.appendChild(vb);
 
-  // if a signal's chart is open, show it up top
+  // if a signal's chart is open, show it up top — and when it was JUST opened,
+  // smooth-scroll it into view (you tapped a tile lower down; bring the chart to you)
   const openSeries = resolvePulseSeries(pulse, state.pulseKey);
-  if (openSeries) wrap.appendChild(pulseChartPanel(openSeries));
+  if (openSeries) {
+    const panel = pulseChartPanel(openSeries);
+    wrap.appendChild(panel);
+    if (state.pulseChartScroll) {
+      state.pulseChartScroll = false;
+      requestAnimationFrame(() => smoothScrollIntoView(panel));
+    }
+  }
 
   // group tabs
   const tabs = document.createElement("div");
@@ -2739,7 +2766,12 @@ function pulseDelta(s) {
 function pulseTile(s) {
   const el = document.createElement("button");
   el.className = "pulse-tile" + (state.pulseKey === s.key ? " on" : "");
-  el.addEventListener("click", () => { state.pulseKey = state.pulseKey === s.key ? null : s.key; route(); });
+  el.addEventListener("click", () => {
+    const opening = state.pulseKey !== s.key;
+    state.pulseKey = opening ? s.key : null;
+    state.pulseChartScroll = opening;   // scroll the chart into view only when opening
+    route();
+  });
 
   // for index series the headline number is the YoY, not the meaningless level
   const big = s.unit === "index" && s.yoy != null ? `${signed(s.yoy)}%` : fmtPulseLevel(s.latest?.value, s.unit);
@@ -2764,7 +2796,12 @@ function pulseZillowTile(label, kind, s) {
   const el = document.createElement("button");
   const vk = "zil_" + kind;
   el.className = "pulse-tile" + (state.pulseKey === vk ? " on" : "");
-  el.addEventListener("click", () => { state.pulseKey = state.pulseKey === vk ? null : vk; route(); });
+  el.addEventListener("click", () => {
+    const opening = state.pulseKey !== vk;
+    state.pulseKey = opening ? vk : null;
+    state.pulseChartScroll = opening;
+    route();
+  });
   const l = document.createElement("div"); l.className = "pt-label"; l.textContent = label;
   const v = document.createElement("div"); v.className = "pt-value"; v.textContent = fmtMoney(s.latest?.value);
   el.append(l, v);
@@ -2990,7 +3027,14 @@ async function renderMarketPage(name) {
     value: md.value && { label: `${name} — Home Value`, unit: "$", ...md.value },
     cs: md.caseShiller && { label: `${name} — Case-Shiller Index`, unit: "index", ...md.caseShiller },
   })[state.marketMetric] : null;
-  if (series) wrap.appendChild(marketChartPanel(series));
+  if (series) {
+    const panel = marketChartPanel(series);
+    wrap.appendChild(panel);
+    if (state.marketChartScroll) {
+      state.marketChartScroll = false;
+      requestAnimationFrame(() => smoothScrollIntoView(panel));
+    }
+  }
 
   // external backdrop tiles
   if (md && (md.rent || md.value || md.caseShiller)) {
@@ -3046,7 +3090,12 @@ async function renderMarketPage(name) {
 function marketStatTile(metric, label, val, yoy, history, invert, suffix) {
   const el = document.createElement("button");
   el.className = "pulse-tile" + (state.marketMetric === metric ? " on" : "");
-  el.addEventListener("click", () => { state.marketMetric = state.marketMetric === metric ? null : metric; route(); });
+  el.addEventListener("click", () => {
+    const opening = state.marketMetric !== metric;
+    state.marketMetric = opening ? metric : null;
+    state.marketChartScroll = opening;
+    route();
+  });
   const l = document.createElement("div"); l.className = "pt-label"; l.textContent = label;
   const v = document.createElement("div"); v.className = "pt-value"; v.textContent = val;
   el.append(l, v);

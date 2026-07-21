@@ -2766,6 +2766,7 @@ button.cal-open:active { background: var(--rule); }
 .pulse-chart-panel {
   border: 1px solid var(--rule); border-radius: 14px;
   background: var(--box); padding: 12px 12px 4px; margin-bottom: 16px;
+  scroll-margin-top: 14px; /* small gap when a tap scrolls this chart into view */
 }
 .pcp-head { display: flex; align-items: center; justify-content: space-between; }
 .pcp-title { font-size: 14px; font-weight: 700; }
