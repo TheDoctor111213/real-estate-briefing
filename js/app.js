@@ -5,7 +5,7 @@
    History has no tab of its own — it's reached by tapping the masthead date. It still gets a hash route.
    Data lives in Supabase (public-read); the pipeline upserts via scripts/push_data.py. */
 
-const APP_VERSION = "v88";
+const APP_VERSION = "v89";
 const SUPABASE_URL = "https://uhwdnmbxiopfysodydty.supabase.co";
 const SUPABASE_KEY = "sb_publishable_LEQ5_-jjcRRl2p0wlaiXcw_RX4Wf8-y";
 // Mapbox public token — a pk.* token is meant to ship to browsers, but GitHub's
@@ -585,12 +585,15 @@ async function getDay(date) {
   } catch { return null; }
 }
 
-/* Every day's data in one shot — powers Search and Trends, which reason over the
-   whole archive rather than one day. Cached; cleared on refresh. */
+/* Every day's data in one shot — powers Search, the Desk and the all-time map,
+   which reason over the whole archive rather than one day. Reads the `days_light`
+   view (story metadata only — the heavy per-story content/coverage/explainer are
+   dropped server-side, ~80% smaller), since none of those surfaces render article
+   text; the reader loads full content per-day via getDay(). Cached; cleared on refresh. */
 async function getAllDays() {
   if (state.allDays) return state.allDays;
   try {
-    const rows = await sb("days?select=date,data&order=date.desc");
+    const rows = await sb("days_light?select=date,data&order=date.desc");
     state.allDays = rows.map((r) => r.data).filter(Boolean);
   } catch { state.allDays = []; }
   return state.allDays;
