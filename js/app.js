@@ -5,7 +5,7 @@
    History has no tab of its own — it's reached by tapping the masthead date. It still gets a hash route.
    Data lives in Supabase (public-read); the pipeline upserts via scripts/push_data.py. */
 
-const APP_VERSION = "v87";
+const APP_VERSION = "v88";
 const SUPABASE_URL = "https://uhwdnmbxiopfysodydty.supabase.co";
 const SUPABASE_KEY = "sb_publishable_LEQ5_-jjcRRl2p0wlaiXcw_RX4Wf8-y";
 // Mapbox public token — a pk.* token is meant to ship to browsers, but GitHub's
@@ -4789,14 +4789,15 @@ async function openReaderRoute(date, id) {
     reader.style.transition = "none";
     reader.style.transform = "translateY(100%)";
     requestAnimationFrame(() => {
-      reader.style.transition = "transform .34s cubic-bezier(.2,.85,.25,1)";
+      // a softer, longer ease-out so the story flows up rather than snapping in
+      reader.style.transition = "transform .42s cubic-bezier(.26,.9,.3,1)";
       reader.style.transform = "translateY(0)";
     });
     setTimeout(() => {
       const s = $("sheet"); s.classList.remove("open"); s.hidden = true;
       document.body.classList.remove("sheet-open");
       reader.style.transition = ""; reader.style.transform = ""; reader.style.zIndex = "";
-    }, 360);
+    }, 440);
   } else {
     reader.style.transition = ""; reader.style.transform = ""; reader.style.opacity = ""; // clear pull-to-close residue
   }
@@ -4997,7 +4998,7 @@ function sheetDragStart(y) { sheetDragY = y; sheetDy = 0; }
 function sheetDragMove(y) {
   if (sheetDragY === null) return;
   sheetDy = y - sheetDragY;
-  const px = sheetDy > 0 ? sheetDy : sheetDy * 0.32; // resistance when pulling up
+  const px = sheetDy > 0 ? sheetDy : sheetDy * 0.42; // gentle give when pulling up (less rigid)
   const c = $("sheet-card");
   c.style.transition = "none";
   c.style.transform = `translateY(${px}px)`;
