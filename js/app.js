@@ -5,7 +5,7 @@
    History has no tab of its own — it's reached by tapping the masthead date. It still gets a hash route.
    Data lives in Supabase (public-read); the pipeline upserts via scripts/push_data.py. */
 
-const APP_VERSION = "v80";
+const APP_VERSION = "v81";
 const SUPABASE_URL = "https://uhwdnmbxiopfysodydty.supabase.co";
 const SUPABASE_KEY = "sb_publishable_LEQ5_-jjcRRl2p0wlaiXcw_RX4Wf8-y";
 // Mapbox public token — a pk.* token is meant to ship to browsers, but GitHub's
@@ -487,11 +487,18 @@ async function init() {
     applyTextScale();
   });
 
-  // hold a player photo to peek at it full-size; release to drop (Instagram-style)
-  let peekTimer = null, peeking = false;
+  // hold a player photo to peek at it full-size; release to drop (Instagram-style).
+  // While held you can slide your finger anywhere and it stays up — only lifting
+  // the finger dismisses it. Capturing the pointer + touch-action:none on the
+  // avatar stops the browser from reclaiming the touch as a scroll (which used to
+  // fire pointercancel and drop the peek on the slightest move).
+  let peekTimer = null, peeking = false, peekPointerId = null, peekEl = null;
   document.addEventListener("pointerdown", (e) => {
     const img = e.target.closest?.(".player-avatar img");
     if (!img || !img.src) return;
+    peekEl = img;
+    peekPointerId = e.pointerId;
+    try { img.setPointerCapture(e.pointerId); } catch { /* mouse etc. */ }
     peekTimer = setTimeout(() => {
       peeking = true;
       $("lightbox-img").src = img.src;
@@ -499,8 +506,14 @@ async function init() {
       $("lightbox").hidden = false;
     }, 160);
   });
-  const endPeek = () => {
+  const endPeek = (e) => {
+    // ignore stray up/cancel from an unrelated pointer while a peek is held
+    if (e && peekPointerId != null && e.pointerId !== peekPointerId) return;
     clearTimeout(peekTimer);
+    if (peekEl && peekPointerId != null) {
+      try { peekEl.releasePointerCapture(peekPointerId); } catch { /* already gone */ }
+    }
+    peekEl = null; peekPointerId = null;
     if (!peeking) return;
     peeking = false;
     $("lightbox").hidden = true;
@@ -508,6 +521,7 @@ async function init() {
     // the release shouldn't also fire the card/link underneath
     document.addEventListener("click", (ev) => { ev.stopPropagation(); ev.preventDefault(); }, { capture: true, once: true });
   };
+  // only the finger LIFTING ends the peek — moves are ignored on purpose
   document.addEventListener("pointerup", endPeek);
   document.addEventListener("pointercancel", endPeek);
 
