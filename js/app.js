@@ -5,7 +5,7 @@
    History has no tab of its own — it's reached by tapping the masthead date. It still gets a hash route.
    Data lives in Supabase (public-read); the pipeline upserts via scripts/push_data.py. */
 
-const APP_VERSION = "v84";
+const APP_VERSION = "v85";
 const SUPABASE_URL = "https://uhwdnmbxiopfysodydty.supabase.co";
 const SUPABASE_KEY = "sb_publishable_LEQ5_-jjcRRl2p0wlaiXcw_RX4Wf8-y";
 // Mapbox public token — a pk.* token is meant to ship to browsers, but GitHub's
@@ -376,9 +376,11 @@ async function init() {
     const t = e.touches[0];
     ft = { card, x: t.clientX, y: t.clientY, dx: 0, horiz: false, moved: false, mode: null };
     ft.timer = setTimeout(() => {
-      // long-press: open the peek and hand this same finger into the sheet drag
+      // short hold: open the peek and hand this same finger into the sheet drag.
+      // Kept just above a normal tap (~120ms) so taps still open the reader, but
+      // low enough that the preview feels near-instant, not a deliberate wait.
       if (ft && !ft.moved) { ft.mode = "peek"; openStoryPeek(card.dataset.date, card.dataset.id, ft.y); }
-    }, 450);
+    }, 200);
   }, { passive: true });
   feed.addEventListener("touchmove", (e) => {
     if (!ft) return;
