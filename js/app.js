@@ -5,7 +5,7 @@
    History has no tab of its own — it's reached by tapping the masthead date. It still gets a hash route.
    Data lives in Supabase (public-read); the pipeline upserts via scripts/push_data.py. */
 
-const APP_VERSION = "v85";
+const APP_VERSION = "v86";
 const SUPABASE_URL = "https://uhwdnmbxiopfysodydty.supabase.co";
 const SUPABASE_KEY = "sb_publishable_LEQ5_-jjcRRl2p0wlaiXcw_RX4Wf8-y";
 // Mapbox public token — a pk.* token is meant to ship to browsers, but GitHub's
@@ -379,7 +379,7 @@ async function init() {
       // short hold: open the peek and hand this same finger into the sheet drag.
       // Kept just above a normal tap (~120ms) so taps still open the reader, but
       // low enough that the preview feels near-instant, not a deliberate wait.
-      if (ft && !ft.moved) { ft.mode = "peek"; openStoryPeek(card.dataset.date, card.dataset.id, ft.y); }
+      if (ft && !ft.moved) { ft.mode = "peek"; openStoryPeek(card.dataset.date, card.dataset.id, card.getBoundingClientRect()); }
     }, 200);
   }, { passive: true });
   feed.addEventListener("touchmove", (e) => {
@@ -4923,19 +4923,51 @@ function hideReader() {
    Tapping any linked name or term opens a bottom sheet — a glance, not a
    navigation. The full page is one tap away (header or the footer button). */
 
-function openSheet(build, isPeek) {
+function openSheet(build, opts) {
+  opts = opts || {};
   const sheet = $("sheet");
   const card = $("sheet-card");
   card.innerHTML = "";
   card.style.transition = "";   // clear any leftover drag inline styles so the
   card.style.transform = "";    // CSS .open rise/fall animates cleanly
+  card.style.opacity = "";
+  card.style.transformOrigin = "";
   // a story peek grows out of the card into a floating rounded card; the
   // dossier sheets stay as bottom sheets. The .peek class swaps the CSS.
-  sheet.classList.toggle("peek", !!isPeek);
+  sheet.classList.toggle("peek", !!opts.peek);
   build(card);
   sheet.hidden = false;
   document.body.classList.add("sheet-open"); // suppresses page-wide text selection
   requestAnimationFrame(() => sheet.classList.add("open"));
+  // the peek scales up FROM the pressed card's on-screen spot (JS-driven, since
+  // only JS knows where that card is) — that's what makes it feel connected
+  if (opts.peek && opts.originRect) growFromCard(card, opts.originRect);
+}
+
+/* Grow the peek out of the card the user pressed: scale up from that card's
+   centre point (clamped inside the peek box so a far-away card can't fling the
+   scale origin miles off). Drives the entrance with inline styles so it beats
+   the CSS, then hands control back to the drag once it has settled. */
+function growFromCard(card, rect) {
+  const fin = card.getBoundingClientRect();
+  if (!fin.width || !fin.height) return;
+  const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+  const ox = clamp((rect.left + rect.width / 2) - fin.left, 0, fin.width);
+  const oy = clamp((rect.top + rect.height / 2) - fin.top, 0, fin.height);
+  card.style.transformOrigin = `${ox}px ${oy}px`;
+  card.style.transition = "none";
+  card.style.transform = "scale(0.46)";
+  card.style.opacity = "0.15";
+  requestAnimationFrame(() => {
+    card.style.transition = "transform .24s cubic-bezier(.2,.82,.24,1), opacity .15s ease";
+    card.style.transform = "scale(1)";
+    card.style.opacity = "1";
+    setTimeout(() => {
+      if (sheetDragY !== null) return;   // a drag took over — let it own the transform
+      card.style.transition = ""; card.style.transform = "";
+      card.style.opacity = ""; card.style.transformOrigin = "";
+    }, 280);
+  });
 }
 
 function closeSheet() {
@@ -5002,9 +5034,9 @@ function sheetOpenStory() {
   location.hash = `/story/${t.date}/${t.id}`;
 }
 
-// long-press peek: summary + hero in a sheet; the long-press finger keeps
-// dragging it (fromY), so you can bob it and fling up (open) or down (dismiss)
-function openStoryPeek(date, id, fromY) {
+// long-press peek: summary + hero in a floating card that grows out of the
+// pressed card (originRect); the finger then bobs it — fling up (open)/down (dismiss)
+function openStoryPeek(date, id, originRect) {
   const story = (state.days.get(date)?.stories || []).find((s) => s.id === id);
   if (!story) return;
   peekTarget = isExpandable(story) ? { date, id } : null;
@@ -5039,7 +5071,7 @@ function openStoryPeek(date, id, fromY) {
       open.addEventListener("click", () => sheetOpenStory());
       card.appendChild(open);
     }
-  }, true); // isPeek: grow into a floating rounded card, not a bottom sheet
+  }, { peek: true, originRect }); // grow into a floating rounded card from the pressed card
   // NB: we do NOT start the drag here — the feed handler lazy-starts it on the
   // first finger move (capturing the finger's position then), so the card never
   // snaps from mid-rise to the finger. `fromY` is unused now, kept for clarity.
