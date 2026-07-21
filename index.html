@@ -3,18 +3,18 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-  <meta name="theme-color" content="#fafaf7" media="(prefers-color-scheme: light)">
-  <meta name="theme-color" content="#101214" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#f2f4f7" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#0d1015" media="(prefers-color-scheme: dark)">
   <title>Real Estate Briefing</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🗞️</text></svg>">
   <!-- installable PWA: manifest + iOS home-screen chrome; sw.js caches the app shell for offline -->
-  <link rel="manifest" href="manifest.webmanifest?v=82">
+  <link rel="manifest" href="manifest.webmanifest?v=83">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="Briefing">
   <link rel="stylesheet" href="https://api.mapbox.com/mapbox-gl-js/v3.9.0/mapbox-gl.css">
   <!-- bump ?v= on every deploy so cached pages can never pair old code with new data -->
-  <link rel="stylesheet" href="css/style.css?v=82">
+  <link rel="stylesheet" href="css/style.css?v=83">
   <script src="https://api.mapbox.com/mapbox-gl-js/v3.9.0/mapbox-gl.js" defer></script>
 </head>
 <body>
@@ -231,7 +231,7 @@
 
   <div id="toast" role="status"></div>
 
-  <script src="js/app.js?v=82"></script>
+  <script src="js/app.js?v=83"></script>
   <script>
     if ('serviceWorker' in navigator) {
       // Auto-update: reload once the instant a new service worker takes control,
@@ -248,7 +248,7 @@
         });
       }
       window.addEventListener('load', function () {
-        navigator.serviceWorker.register('sw.js?v=82').then(function (reg) {
+        navigator.serviceWorker.register('sw.js?v=83').then(function (reg) {
           reg.update(); // check for a newer version right now…
           document.addEventListener('visibilitychange', function () {
             // …and every time the app is reopened or refocused

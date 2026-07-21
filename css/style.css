@@ -1,13 +1,17 @@
 :root {
-  /* "paper white": reads as white until it sits next to true #fff/#000 */
-  --bg: #fafaf7;
+  /* Soft-card ground: a cool paper-gray (not warm cream) so white cards lift
+     off it on a shadow instead of needing a border. */
+  --bg: #f2f4f7;
   --box: #ffffff;
-  --ink: #14181d;
-  --ink-2: #59626d;
-  --ink-3: #99a1ab;
-  --rule: #e6e9ed;
-  --rule-strong: #14181d;
-  --accent: #2158a8;
+  --ink: #16191f;
+  --ink-2: #5a626d;
+  --ink-3: #8b929d;
+  --rule: #e7eaef;
+  --rule-strong: #16191f;
+  --accent: #35589e;
+  /* the drop shadow that floats every card; one token so cards stay in lockstep */
+  --card-shadow: 0 1px 2px rgba(20,26,34,.04), 0 8px 20px -14px rgba(20,26,34,.26);
+  --card-shadow-press: 0 1px 2px rgba(20,26,34,.05), 0 2px 6px -3px rgba(20,26,34,.18);
   --serif: "New York", ui-serif, Georgia, "Times New Roman", serif;
   --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", sans-serif;
   --pad: clamp(16px, 4.5vw, 28px);
@@ -17,14 +21,16 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #101214;
-    --box: #191c1f;
-    --ink: #e7e9ec;
-    --ink-2: #a2a9b1;
-    --ink-3: #6d7580;
-    --rule: #2a2e33;
-    --rule-strong: #e7e9ec;
-    --accent: #7cb0f5;
+    --bg: #0d1015;
+    --box: #171b21;
+    --ink: #e8ebf0;
+    --ink-2: #a3abb6;
+    --ink-3: #6c7480;
+    --rule: #242b34;
+    --rule-strong: #e8ebf0;
+    --accent: #8fabe6;
+    --card-shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 24px -14px rgba(0,0,0,.55);
+    --card-shadow-press: 0 1px 2px rgba(0,0,0,.5), 0 2px 6px -3px rgba(0,0,0,.5);
   }
 }
 
@@ -326,7 +332,7 @@ main {
 .story-group {
   display: grid;
   grid-template-columns: 1fr;
-  gap: 8px;
+  gap: 11px;
 }
 
 /* ---------- Lede ---------- */
@@ -390,12 +396,21 @@ main {
   width: 100%;
   text-align: left;
   background: var(--box);
-  border: 1px solid var(--rule);
-  border-radius: 8px;
-  padding: 13px 15px;
+  border: none;
+  border-radius: 13px;
+  padding: 15px 16px;
+  box-shadow: var(--card-shadow);
   -webkit-tap-highlight-color: transparent;
-  transition: border-color 0.12s ease;
+  /* transform+shadow animate together so press-to-preview reads as one motion */
+  transition: transform 0.17s cubic-bezier(.22,.61,.36,1), box-shadow 0.17s ease;
 }
+/* press-in: the card sinks a touch and its shadow tucks under — the tactile cue
+   that a hold-to-preview is building. Springs back cleanly on release. */
+.story:not(.static):active {
+  transform: scale(0.978);
+  box-shadow: var(--card-shadow-press);
+}
+@media (prefers-reduced-motion: reduce) { .story { transition: box-shadow 0.17s ease; } .story:not(.static):active { transform: none; } }
 
 .story h3 {
   font-weight: 600;
@@ -457,7 +472,7 @@ main {
   line-height: 1;
   color: var(--ink-2);
   border: 1px solid var(--rule);
-  border-radius: 99px;
+  border-radius: 7px;
   padding: 4px 8px;
   white-space: nowrap;
 }
@@ -2297,9 +2312,11 @@ button,
 
 /* read-state: cards you've opened or marked read dim subtly */
 .story.is-read { opacity: 0.58; }
+/* keep the base float behind the colored swipe edge (box-shadow would otherwise
+   drop the card shadow the instant a swipe starts) */
 /* swipe action hints (card translated inline via JS) */
-.story.swipe-save { box-shadow: inset -5px 0 0 -1px #d9a010; } /* save = swipe left */
-.story.swipe-read { box-shadow: inset 5px 0 0 -1px var(--accent); } /* read = swipe right */
+.story.swipe-save { box-shadow: inset -5px 0 0 -1px #d9a010, var(--card-shadow); } /* save = swipe left */
+.story.swipe-read { box-shadow: inset 5px 0 0 -1px var(--accent), var(--card-shadow); } /* read = swipe right */
 
 /* long-press peek sheet — fixed hero height so the sheet never reflows/jumps
    when the image finishes loading (that was the "photo resizes a second later") */
@@ -2444,14 +2461,16 @@ body.sheet-open, body.sheet-open * {
   display: block;
   width: 100%;
   text-align: left;
-  border: 1px solid var(--rule);
-  border-radius: 12px;
+  border: none;
+  border-radius: 13px;
   background: var(--box);
-  padding: 14px 16px;
+  box-shadow: var(--card-shadow);
+  padding: 15px 16px;
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
+  transition: transform 0.17s cubic-bezier(.22,.61,.36,1), box-shadow 0.17s ease;
 }
-.thread-card:active { background: var(--rule); }
+.thread-card:active { transform: scale(0.978); box-shadow: var(--card-shadow-press); }
 .thread-card-top { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
 .thread-card-top h3 { font-family: var(--serif); font-size: 17px; font-weight: 700; line-height: 1.25; }
 .thread-anchor { color: var(--ink-2); font-size: 13px; line-height: 1.5; margin-top: 4px; }
@@ -2524,8 +2543,10 @@ body.sheet-open, body.sheet-open * {
 }
 .thread-list + .thread-group-head { margin-top: 22px; }
 
-/* a canopy summary card reads like a thread card with a green edge */
-.canopy-card { border-left: 3px solid var(--accent); }
+/* a canopy summary card reads like a thread card with an accent edge (drawn as
+   an inset shadow so it layers with the card's drop shadow) */
+.canopy-card { box-shadow: inset 3px 0 0 0 var(--accent), var(--card-shadow); }
+.canopy-card:active { box-shadow: inset 3px 0 0 0 var(--accent), var(--card-shadow-press); }
 .chip-canopy {
   cursor: pointer;
   color: var(--accent);
@@ -2843,18 +2864,18 @@ button.cal-open:active { background: var(--rule); }
   display: flex;
   flex-direction: column;
   gap: 8px;
-  border: 1px solid var(--rule);
+  border: none;
   border-radius: 14px;
   background: var(--box);
-  padding: 14px;
+  box-shadow: var(--card-shadow);
+  padding: 15px;
   text-decoration: none;
   color: var(--ink);
   min-height: 118px;
   -webkit-tap-highlight-color: transparent;
-  transition: border-color 0.14s, transform 0.06s;
+  transition: transform 0.17s cubic-bezier(.22,.61,.36,1), box-shadow 0.17s ease;
 }
-.desk-card:active { transform: scale(0.985); background: var(--rule); }
-.desk-card:hover { border-color: var(--ink-3); }
+.desk-card:active { transform: scale(0.978); box-shadow: var(--card-shadow-press); }
 .desk-card .dc-icon { font-size: 24px; line-height: 1; }
 .desk-card .dc-body { flex: 1; display: flex; flex-direction: column; gap: 3px; }
 .desk-card .dc-title { font-size: 15px; font-weight: 700; letter-spacing: -0.2px; }
@@ -2870,7 +2891,8 @@ button.cal-open:active { background: var(--rule); }
   gap: 14px;
   min-height: 0;
   background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 10%, var(--box)), var(--box));
-  border-color: color-mix(in srgb, var(--accent) 32%, var(--rule));
+  /* the flagship keeps a faint accent ring — drawn as a shadow now that cards are borderless */
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 26%, transparent), var(--card-shadow);
 }
 .desk-card.dc-feature .dc-icon { font-size: 30px; }
 .desk-card.dc-feature .dc-body { gap: 4px; }
