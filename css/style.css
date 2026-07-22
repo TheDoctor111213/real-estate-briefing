@@ -3162,7 +3162,19 @@ button.cal-open:active { background: var(--rule); }
   border-radius: 10px; padding: 12px 14px;
   box-shadow: 0 6px 24px rgba(0,0,0,0.28);
 }
-.mapboxgl-popup-tip { border-top-color: var(--box) !important; border-bottom-color: var(--box) !important; }
+/* Popup tail — Mapbox draws the tip as a CSS triangle whose POINTING border is
+   colored and whose other borders stay transparent. Default styling only handles
+   the top/bottom anchors, so side (left/right) tails showed white AND had their
+   diagonal edges wrongly filled. Color ONLY the pointing border per anchor so the
+   tail is a clean triangle matching the dark popup on every side. */
+.mapboxgl-popup-anchor-top .mapboxgl-popup-tip,
+.mapboxgl-popup-anchor-top-left .mapboxgl-popup-tip,
+.mapboxgl-popup-anchor-top-right .mapboxgl-popup-tip { border-bottom-color: var(--box) !important; }
+.mapboxgl-popup-anchor-bottom .mapboxgl-popup-tip,
+.mapboxgl-popup-anchor-bottom-left .mapboxgl-popup-tip,
+.mapboxgl-popup-anchor-bottom-right .mapboxgl-popup-tip { border-top-color: var(--box) !important; }
+.mapboxgl-popup-anchor-left .mapboxgl-popup-tip { border-right-color: var(--box) !important; }
+.mapboxgl-popup-anchor-right .mapboxgl-popup-tip { border-left-color: var(--box) !important; }
 .mapboxgl-popup-close-button { font-size: 17px; color: var(--ink-3); padding: 0 6px; }
 .map-popup .pop-market {
   display: inline-block; margin-top: 8px; font-size: 12px; font-weight: 600;
