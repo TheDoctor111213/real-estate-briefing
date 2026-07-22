@@ -1,0 +1,37 @@
+# Player avatars: source a real logo/headshot for any roster entry still missing
+# one, and re-host it in the Supabase `player-images` bucket. Runs on GitHub's
+# runners for the same reason the content filler does — UNRESTRICTED egress. The
+# cloud routine's sandbox can't resolve many company sites (or logo.clearbit,
+# apple-touch-icon hosts, Wikipedia media), so avatars sourced there fall to
+# monograms; here CBRE/Hines/Newmark/etc. resolve and fill cleanly.
+# Idempotent: only players with no `image` are touched, so a quiet day is a no-op.
+name: Backfill player images
+
+on:
+  schedule:
+    # once daily, 13:10 UTC (~9 AM ET) — new roster entries get an avatar within a day
+    - cron: "10 13 * * *"
+  workflow_dispatch:
+    inputs:
+      args:
+        description: "Extra args (e.g. --all, or specific slugs)"
+        required: false
+
+concurrency:
+  group: player-images
+  cancel-in-progress: false
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # stdlib-only script (urllib) — no dependencies to install
+      - name: Source & re-host missing avatars
+        run: python scripts/backfill_player_images.py ${{ github.event.inputs.args }}
