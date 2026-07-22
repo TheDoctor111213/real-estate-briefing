@@ -3084,3 +3084,39 @@ button.cal-open:active { background: var(--rule); }
   display: block; font-family: var(--serif); font-size: 15px; font-weight: 700; color: var(--ink);
 }
 .pulse-cited-head .pcc-sub { display: block; font-size: 11.5px; color: var(--ink-3); margin-top: 2px; line-height: 1.4; }
+
+/* ---------- Floating soft-card system (app-wide consistency) ----------
+   The feed, Desk and Threads cards float on a soft shadow instead of a border
+   (.story / .desk-card / .thread-card). This gives every OTHER primary content
+   card across the app the same treatment, so the floating-light look is uniform
+   everywhere. Deliberately NOT floated: hairline-separated list rows
+   (.league-row/.ledger-row/.status-row/.coverage-row/.pmk-row/.leaf-row/timeline),
+   pills/toggles/inputs, stat strips (.canopy-stats), the pulse verdict panel
+   (semantic colored left border) and the reconnect card (its own modal shadow) —
+   floating those would read as visual noise, not consistency. Appended last so it
+   cleanly overrides each card's original border rule. */
+.player-card, .day-card, .totd, .catchup, .reader-next-card, .reader-done,
+.status-card, .cal-row, .metric-card, .pulse-tile, .mm-tile, .comp-market,
+.rate-tile {
+  border: none;
+  box-shadow: var(--card-shadow);
+}
+.reconnect-card { border: none; }  /* keeps its own deeper modal shadow */
+
+/* the cited-metric accent edge, redrawn as an inset shadow so it layers on the float */
+.metric-card.mc-national {
+  border-left: none;
+  box-shadow: inset 3px 0 0 0 color-mix(in srgb, var(--accent) 55%, transparent), var(--card-shadow);
+}
+.metric-card.mc-regional {
+  border-left: none;
+  box-shadow: inset 3px 0 0 0 color-mix(in srgb, #d98324 62%, transparent), var(--card-shadow);
+}
+/* selected tiles keep their accent ring AND the float */
+.pulse-tile.on, .rate-tile.on {
+  box-shadow: inset 0 0 0 1px var(--accent), var(--card-shadow);
+}
+/* tap-through cards press in like the feed cards (shadow tucks under) */
+.player-card:active, .day-card:active, .reader-next-card:active, .rate-tile.clickable:active {
+  box-shadow: var(--card-shadow-press);
+}
