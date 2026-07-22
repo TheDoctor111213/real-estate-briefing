@@ -2052,6 +2052,29 @@ button.heat-cell:active { outline: 1.5px solid var(--ink); }
 .status-action:active { transform: scale(0.985); }
 .status-action:disabled { opacity: 0.55; }
 
+/* pull-to-refresh hint: a small pill anchored just under the masthead, faded in
+   by JS as the briefing is dragged down. No spinner — the toast is the feedback. */
+.ptr {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+  opacity: 0;
+  z-index: 6;
+}
+.ptr #ptr-label {
+  margin-top: -12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-2);
+  background: var(--box);
+  padding: 6px 15px;
+  border-radius: 999px;
+  box-shadow: var(--card-shadow);
+  letter-spacing: 0.01em;
+}
+
 /* slim connectivity banner at the very top of the flow; only shown while offline
    (takes no space when hidden). Carries the notch inset so the masthead below it
    drops its own top inset, avoiding a double gap. */

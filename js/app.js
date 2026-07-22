@@ -5,7 +5,7 @@
    History has no tab of its own — it's reached by tapping the masthead date. It still gets a hash route.
    Data lives in Supabase (public-read); the pipeline upserts via scripts/push_data.py. */
 
-const APP_VERSION = "v93";
+const APP_VERSION = "v94";
 const SUPABASE_URL = "https://uhwdnmbxiopfysodydty.supabase.co";
 const SUPABASE_KEY = "sb_publishable_LEQ5_-jjcRRl2p0wlaiXcw_RX4Wf8-y";
 // Mapbox public token — a pk.* token is meant to ship to browsers, but GitHub's
@@ -241,15 +241,16 @@ async function init() {
   $("prev-day").addEventListener("click", () => stepDay(-1));
   $("next-day").addEventListener("click", () => stepDay(1));
 
-  // the wordmark ALWAYS returns to the current day — from an older day, from
-  // any tab, from anywhere. Only when you're already on today does it refresh
-  // instead (data AND app updates — see hardRefresh).
+  // the wordmark returns to today from anywhere else; once you're already on
+  // today it opens System status instead (refresh now lives on pull-to-refresh, so
+  // the header is free to reach the status/offline page without scrolling to the
+  // footer). From an older day it still snaps back to today first.
   document.querySelector(".wordmark").addEventListener("click", (e) => {
     e.preventDefault();
     const latest = state.dates[state.dates.length - 1] || null;
     const h = location.hash;
     const onBriefing = h === "" || h === "#/" || h.startsWith("#/day/");
-    if (onBriefing && state.currentDate === latest) { hardRefresh(); return; }
+    if (onBriefing && state.currentDate === latest) { location.hash = "/status"; return; }
     state.currentDate = latest;
     if (h === "" || h === "#/") route(); // hash unchanged → no hashchange event
     else location.hash = "/";
@@ -504,6 +505,58 @@ async function init() {
   document.addEventListener("click", (e) => {
     if (peekSwallowClick) { peekSwallowClick = false; e.preventDefault(); e.stopPropagation(); }
   }, true);
+
+  // Pull-to-refresh: drag the briefing down from the very top to reload. No
+  // spinner — a clear pull past the threshold fires the refresh on release and the
+  // toast carries the message ("Briefing updated" / "Up to date"), so it never
+  // sits there loading. Only engages on the home feed, at scrollTop 0, pulling DOWN.
+  const mainEl = document.querySelector("main");
+  const ptr = $("ptr"), ptrLabel = $("ptr-label");
+  const PTR_TRIGGER = 72;   // px pulled (after resistance) to arm the refresh
+  const PTR_MAX = 96;       // clamp so it never drags forever
+  let pt = null;
+  const ptrHome = () => {
+    const h = location.hash;
+    return (h === "" || h === "#/" || h.startsWith("#/day/"))
+      && $("reader").hidden && $("sheet").hidden && $("lightbox").hidden && $("profiles").hidden;
+  };
+  window.addEventListener("touchstart", (e) => {
+    pt = null;
+    if (e.touches.length !== 1) return;
+    if (!ptrHome() || window.scrollY > 0) return;
+    pt = { y: e.touches[0].clientY, dy: 0, armed: false, engaged: false };
+  }, { passive: true });
+  window.addEventListener("touchmove", (e) => {
+    if (!pt || peekActive) return;
+    const dy = e.touches[0].clientY - pt.y;
+    if (!pt.engaged) {
+      if (dy < 6 || window.scrollY > 0) { pt = null; return; } // upward / not at top → let it scroll
+      pt.engaged = true;
+      // anchor the hint just under the masthead (its height varies with the notch)
+      ptr.style.top = document.querySelector(".masthead").getBoundingClientRect().bottom + "px";
+      ptr.classList.add("on");
+    }
+    e.preventDefault();
+    pt.dy = dy;
+    const pull = Math.min(dy * 0.5, PTR_MAX);   // rubber-band resistance
+    mainEl.style.transform = `translateY(${pull}px)`;
+    pt.armed = pull >= PTR_TRIGGER;
+    ptr.style.transform = `translateY(${Math.min(pull, PTR_TRIGGER)}px)`;
+    ptr.style.opacity = String(Math.min(pull / PTR_TRIGGER, 1));
+    ptrLabel.textContent = pt.armed ? "Release to refresh" : "Pull to refresh";
+  }, { passive: false });
+  const ptrEnd = () => {
+    if (!pt) return;
+    const armed = pt.armed; pt = null;
+    mainEl.style.transition = "transform .24s cubic-bezier(.2,.9,.25,1)";
+    mainEl.style.transform = "";
+    ptr.style.transform = ""; ptr.style.opacity = "";
+    ptr.classList.remove("on");
+    setTimeout(() => { mainEl.style.transition = ""; }, 260);
+    if (armed) hardRefresh(); // data refresh + app-update check; its toast is the feedback
+  };
+  window.addEventListener("touchend", ptrEnd, { passive: true });
+  window.addEventListener("touchcancel", ptrEnd, { passive: true });
 
   // share the open story as a typographic image card
   $("reader-share").addEventListener("click", () => {
