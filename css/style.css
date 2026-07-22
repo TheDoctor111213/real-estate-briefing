@@ -1786,6 +1786,9 @@ html, body { overflow-x: hidden; }
   transition: opacity 0.25s ease;
 }
 .sheet.open .sheet-backdrop { opacity: 1; }
+/* fling-to-open: fade the scrim fast so the destination isn't seen through a
+   lingering peek (the card itself is animated up-and-out in JS) */
+.sheet.flinging .sheet-backdrop { opacity: 0; transition: opacity 0.16s ease; }
 .sheet-card {
   position: absolute;
   left: 0;

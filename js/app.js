@@ -5,7 +5,7 @@
    History has no tab of its own — it's reached by tapping the masthead date. It still gets a hash route.
    Data lives in Supabase (public-read); the pipeline upserts via scripts/push_data.py. */
 
-const APP_VERSION = "v100";
+const APP_VERSION = "v101";
 const SUPABASE_URL = "https://uhwdnmbxiopfysodydty.supabase.co";
 const SUPABASE_KEY = "sb_publishable_LEQ5_-jjcRRl2p0wlaiXcw_RX4Wf8-y";
 // Mapbox public token — a pk.* token is meant to ship to browsers, but GitHub's
@@ -5347,6 +5347,28 @@ function sheetDismiss() {
   document.body.classList.remove("sheet-open");
   setTimeout(() => { const s = $("sheet"); s.classList.remove("open"); s.hidden = true; }, 220);
 }
+// fling a ROUTE peek (player / term / tale / saga) up into its full page. The
+// full page is a normal hash route, not an overlay we can slide, so instead of
+// snapping the dragged card back down (the old sheetGo→closeSheet path did that,
+// then let it hover over the new page), we CONTINUE the card upward from wherever
+// the finger left it and fade it out as the destination paints underneath — one
+// clean upward motion, no bounce, no lingering preview.
+function sheetFlingTo(hash) {
+  const c = $("sheet-card"), sheet = $("sheet");
+  peekFling = null; sheetDragY = null; sheetDy = 0;
+  c.style.transition = "transform .2s cubic-bezier(.32,.72,.24,1), opacity .18s ease";
+  c.style.transform = "translateY(-64px)";
+  c.style.opacity = "0";
+  sheet.classList.add("flinging");     // fast scrim fade (CSS)
+  location.hash = hash;                 // destination renders under the fade
+  setTimeout(() => {
+    sheet.classList.remove("open", "flinging");
+    sheet.hidden = true;
+    c.style.transition = ""; c.style.transform = ""; c.style.opacity = "";
+    document.body.classList.remove("sheet-open");
+  }, 200);
+}
+
 // fling a STORY peek up into the full reader: leave the sheet frozen where the
 // fling left it and let openReaderRoute slide the article UP over it — one
 // continuous upward motion, the peek "growing" into the article.
@@ -5434,7 +5456,7 @@ async function openPlayerSheet(slug, originRect) {
   const players = await getPlayers();
   const p = players.get(slug);
   if (!p) { location.hash = `/player/${slug}`; return; }
-  const peekOpts = originRect ? { peek: true, originRect, onFling: () => sheetGo(`/player/${slug}`) } : {};
+  const peekOpts = originRect ? { peek: true, originRect, onFling: () => sheetFlingTo(`/player/${slug}`) } : {};
   openSheet((card) => {
     const head = document.createElement("button");
     head.className = "sheet-head";
@@ -5514,7 +5536,7 @@ async function openTermSheet(slug, originRect) {
   const terms = await getTerms();
   const t = terms.get(slug);
   if (!t) { location.hash = `/term/${slug}`; return; }
-  const peekOpts = originRect ? { peek: true, originRect, onFling: () => sheetGo(`/term/${slug}`) } : {};
+  const peekOpts = originRect ? { peek: true, originRect, onFling: () => sheetFlingTo(`/term/${slug}`) } : {};
   openSheet((card) => {
     const head = document.createElement("button");
     head.className = "sheet-head";
@@ -5554,7 +5576,7 @@ async function openThreadPeek(slug, originRect) {
   const threads = await getThreads();
   const t = threads.find((x) => x.slug === slug);
   if (!t) { location.hash = `/thread/${slug}`; return; }
-  const peekOpts = originRect ? { peek: true, originRect, onFling: () => sheetGo(`/thread/${slug}`) } : {};
+  const peekOpts = originRect ? { peek: true, originRect, onFling: () => sheetFlingTo(`/thread/${slug}`) } : {};
   openSheet((card) => {
     const head = document.createElement("button");
     head.className = "sheet-head";
@@ -5620,7 +5642,7 @@ async function openCanopyPeek(slug, originRect) {
   const c = campaigns.find((x) => x.slug === slug);
   if (!c) { location.hash = `/campaign/${slug}`; return; }
   const threadMap = new Map(threads.map((t) => [t.slug, t]));
-  const peekOpts = originRect ? { peek: true, originRect, onFling: () => sheetGo(`/campaign/${slug}`) } : {};
+  const peekOpts = originRect ? { peek: true, originRect, onFling: () => sheetFlingTo(`/campaign/${slug}`) } : {};
   openSheet((card) => {
     const head = document.createElement("button");
     head.className = "sheet-head";
