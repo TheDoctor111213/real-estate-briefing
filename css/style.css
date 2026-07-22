@@ -714,6 +714,16 @@ main {
   margin-bottom: 14px;
 }
 
+/* Index tab segment control (People / Companies / Terms) — its own row at the top
+   of every sub-view, content-width and left-aligned, so switching never shifts it */
+.index-seg {
+  display: flex;
+  width: max-content;
+  max-width: 100%;
+  margin: 2px 0 12px;
+  overflow-x: auto;
+}
+
 .player-search {
   flex: 1 1 150px;
   min-width: 0;

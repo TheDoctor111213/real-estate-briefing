@@ -5,7 +5,7 @@
    History has no tab of its own — it's reached by tapping the masthead date. It still gets a hash route.
    Data lives in Supabase (public-read); the pipeline upserts via scripts/push_data.py. */
 
-const APP_VERSION = "v95";
+const APP_VERSION = "v96";
 const SUPABASE_URL = "https://uhwdnmbxiopfysodydty.supabase.co";
 const SUPABASE_KEY = "sb_publishable_LEQ5_-jjcRRl2p0wlaiXcw_RX4Wf8-y";
 // Mapbox public token — a pk.* token is meant to ship to browsers, but GitHub's
@@ -172,6 +172,8 @@ const state = {
   map: null,
   markers: null,
   mapMode: "day",
+  mapFitPending: true, // fit the camera to the data only on the FIRST map draw; after
+                       // that, mode switches / filters / re-entry keep your zoom & center
   filters: { type: null, asset: null, market: null },
   groupBy: "section",
   mapTypeFilter: null, // null = all; otherwise a Set of dealTypes
@@ -1817,7 +1819,11 @@ async function renderMap() {
 
   state.mapShown = shown;
   renderMapLegend(tally);
-  drawDeals(shown, true);
+  // fit-to-data only on the very first draw; mode switches, filter changes, and
+  // leaving/returning to the map all keep the camera where the user left it
+  const fit = state.mapFitPending;
+  state.mapFitPending = false;
+  drawDeals(shown, fit);
   renderPlayback(shown);
 }
 
@@ -3689,6 +3695,33 @@ function linkifyElement(root, excludeSlug) {
   });
 }
 
+/* The shared Index segment control — People / Companies / Terms, each with a live
+   count, built identically and placed in the same spot on all three sub-views so
+   switching never shifts the layout. People/Companies filter the roster in place;
+   Terms opens the dictionary. */
+async function indexSegBar(active) {
+  const [players, terms] = await Promise.all([getPlayers(), getTerms()]);
+  const all = [...players.values()];
+  const nPeople = all.filter((p) => p.type === "person").length;
+  const bar = document.createElement("div");
+  bar.className = "map-toggle index-seg";
+  const seg = (key, label, n, go) => {
+    const b = document.createElement("button");
+    b.className = active === key ? "on" : "";
+    b.textContent = `${label} · ${n}`;
+    b.addEventListener("click", () => { if (active !== key) go(); });
+    bar.appendChild(b);
+  };
+  const roster = () => {
+    if (location.hash === "#/players" || location.hash === "#/index") renderPlayers();
+    else location.hash = "#/players";
+  };
+  seg("people", "People", nPeople, () => { state.playerType = "people"; state.indexSeg = "people"; roster(); });
+  seg("companies", "Companies", all.length - nPeople, () => { state.playerType = "companies"; state.indexSeg = "companies"; roster(); });
+  seg("terms", "Terms", terms.size, () => { state.indexSeg = "terms"; location.hash = "#/dictionary"; });
+  return bar;
+}
+
 async function renderPlayers() {
   const wrap = $("players-content");
   wrap.innerHTML = "";
@@ -3705,27 +3738,10 @@ async function renderPlayers() {
   const all = [...players.values()];
   const nPeople = all.filter((p) => p.type === "person").length;
 
+  wrap.appendChild(await indexSegBar(state.playerType));
+
   const bar = document.createElement("div");
   bar.className = "players-bar";
-
-  const toggle = document.createElement("div");
-  toggle.className = "map-toggle index-seg";
-  for (const [key, label, n] of [["people", "People", nPeople], ["companies", "Companies", all.length - nPeople]]) {
-    const b = document.createElement("button");
-    b.className = state.playerType === key ? "on" : "";
-    b.textContent = `${label} · ${n}`;
-    b.addEventListener("click", () => {
-      state.playerType = key;
-      for (const btn of toggle.children) btn.classList.toggle("on", btn === b);
-      renderPlayerList(all);
-    });
-    toggle.appendChild(b);
-  }
-  // third segment of the Index tab — jumps to the dictionary (Terms)
-  const termsBtn = document.createElement("button");
-  termsBtn.textContent = "Terms";
-  termsBtn.addEventListener("click", () => { state.indexSeg = "terms"; location.hash = "#/dictionary"; });
-  toggle.appendChild(termsBtn);
 
   const search = document.createElement("input");
   search.className = "player-search";
@@ -3745,7 +3761,7 @@ async function renderPlayers() {
   sort.value = state.playerSort;
   sort.addEventListener("change", () => { state.playerSort = sort.value; renderPlayerList(all); });
 
-  bar.append(toggle, search, sort);
+  bar.append(search, sort);
   wrap.appendChild(bar);
 
   const list = document.createElement("div");
@@ -3964,20 +3980,8 @@ async function renderDictionary() {
   const wrap = $("dictionary-content");
   wrap.innerHTML = "";
 
-  // Index segment control — People / Companies jump back to the roster, Terms is here
-  const seg = document.createElement("div");
-  seg.className = "map-toggle index-seg index-seg-terms";
-  const segBtn = (label, on, go) => {
-    const b = document.createElement("button");
-    b.textContent = label;
-    if (on) b.className = "on";
-    b.addEventListener("click", go);
-    return b;
-  };
-  seg.appendChild(segBtn("People", false, () => { state.playerType = "people"; state.indexSeg = "people"; location.hash = "#/players"; }));
-  seg.appendChild(segBtn("Companies", false, () => { state.playerType = "companies"; state.indexSeg = "companies"; location.hash = "#/players"; }));
-  seg.appendChild(segBtn("Terms", true, () => {}));
-  wrap.appendChild(seg);
+  // shared Index segment control — People / Companies / Terms, with counts
+  wrap.appendChild(await indexSegBar("terms"));
 
   const terms = await getTerms();
 
