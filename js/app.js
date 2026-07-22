@@ -5,7 +5,7 @@
    History has no tab of its own — it's reached by tapping the masthead date. It still gets a hash route.
    Data lives in Supabase (public-read); the pipeline upserts via scripts/push_data.py. */
 
-const APP_VERSION = "v97";
+const APP_VERSION = "v98";
 const SUPABASE_URL = "https://uhwdnmbxiopfysodydty.supabase.co";
 const SUPABASE_KEY = "sb_publishable_LEQ5_-jjcRRl2p0wlaiXcw_RX4Wf8-y";
 // Mapbox public token — a pk.* token is meant to ship to browsers, but GitHub's
@@ -6933,7 +6933,7 @@ async function renderThreads() {
     if (campaigns.length) {
       const sub = document.createElement("p");
       sub.className = "thread-group-head";
-      sub.textContent = "🧵 Arcs";
+      sub.textContent = "🧵 Standalone threads — arcs not part of a canopy";
       wrap.appendChild(sub);
     }
     const list = document.createElement("div");
