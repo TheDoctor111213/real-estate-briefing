@@ -39,22 +39,71 @@ SOURCES = [
     "Marcus & Millichap", "Fitch", "DBRS", "Kroll", "KBRA", "Zumper", "Realtor.com",
     "Black Knight", "ICE", "Cushman & Wakefield", "Yardi Matrix", "Federal Reserve",
     "St. Louis Fed", "SLOOS", "Deloitte", "PwC", "Avison Young", "Lument", "Berkadia",
-    "Freddie", "Fannie", "Cushman", "Delinquency", "Trepp",
+    "Freddie", "Fannie", "Cushman",
+    # promoted from the review queue as they recurred (the script flags novel sources
+    # under "⚠ unrecognised sources"; add the legitimate recurring ones here):
+    "Parcl Labs", "Apartments.com", "EIA", "Corcoran", "Miller Samuel", "RealtyRates",
+    "Placer.ai", "Kastle", "Zonda", "John Burns Research", "Cotality", "Altus",
 ]
 # de-dup, longest-first so "S&P CoreLogic" wins over "CoreLogic"
 SOURCES = sorted(set(SOURCES), key=len, reverse=True)
 SRC_RE = re.compile(r"\b(" + "|".join(re.escape(s) for s in SOURCES) + r")\b", re.I)
 
-# a figure that reads like a market series, not a deal price: a percent, bps, an
-# index level, or a rent/price with a clear unit. (Bare $-amounts are deal sizes —
-# those are valueUsd, not metrics — so we DON'T match plain "$109M".)
+# The curated list above is a CONFIDENCE label, not a gate. A brand-new source we've
+# never seen must not slip through, so a figure ALSO qualifies when it sits next to
+# the GRAMMAR of attribution to a NAMED entity — "per X", "according to X", or
+# "X reported / X's data / X survey", where X is a proper noun. That catches any
+# novel data shop and tags it "review (new source?)" so the routine promotes the
+# recurring ones into SOURCES (a one-line edit the script tells you to make).
+# Requiring a real named entity (not a bare noun like "report"/"project") is what
+# keeps this from firing on every sentence.
+_ENT = r"(?:[A-Z][A-Za-z0-9.&'’-]*)(?:\s+(?:&\s+|of\s+|the\s+)?[A-Z][A-Za-z0-9.&'’-]*){0,3}"
+ATTR_ENTITY = [
+    # "per / according to / reported by  [a|the report from|by]  <Entity>"
+    re.compile(r"\b(?:per|according to|via|cited by|reported by)\s+"
+               r"(?:the\s+|a\s+|an\s+)?(?:[a-z]+\s+(?:from\s+|by\s+)?)?(" + _ENT + r")"),
+    # "<Entity>('s) [Group] reported / data / survey / index / estimates / …"
+    re.compile(r"\b(" + _ENT + r")(?:'s|’s)?\s+(?:Group\s+)?(?:reported|reports|said|"
+               r"says|found|finds|estimates?|projects|pegged|data show|data shows|"
+               r"survey|index|analysis|figures|research)\b"),
+]
+# tokens that can fill the attribution slot but never NAME a data source
+NON_SOURCE = {"the", "it", "its", "this", "that", "he", "she", "they", "we", "a", "an",
+              "company", "firm", "report", "data", "survey", "index", "analysis",
+              "research", "release", "spokesperson", "landlord", "seller", "buyer",
+              "listing", "broker", "developer", "publication", "project", "deal",
+              "january", "february", "march", "april", "may", "june", "july", "august",
+              "september", "october", "november", "december", "monday", "tuesday",
+              "wednesday", "thursday", "friday", "q1", "q2", "q3", "q4"}
+
+# a figure that reads like a MARKET SERIES: a percent or basis-point move. Bare $
+# amounts are deal sizes (valueUsd) and $/sf are single-deal comps (handled by the
+# Desk's comps board), so we deliberately DON'T match those — a $-level or index
+# metric with no % is left to the routine's own read (the script is a floor, not a
+# ceiling; see CLAUDE.md step 10d).
 NUM_RE = re.compile(
-    r"(\$?\d[\d,]*(?:\.\d+)?\s?(?:%|percent|percentage points|bps|basis points|"
-    r"per square foot|per sf|psf|/sf|a month|per month))",
+    r"(\d[\d,]*(?:\.\d+)?\s?(?:%|percent|percentage points|bps|basis points))",
     re.I,
 )
 TAG_RE = re.compile(r"<[^>]+>")
 SENT_SPLIT = re.compile(r"(?<=[.!?])\s+(?=[A-Z0-9$])")
+
+
+def attributed_source(sent):
+    """Name the source a sentence attributes a figure to. Returns (name, known):
+    a curated source (known=True), else a NAMED proper noun in an attribution slot
+    (known=False → 'review, maybe a new source'), else (None, False) — no attribution
+    to a real source, so it isn't a market metric."""
+    known = SRC_RE.search(sent)
+    if known:
+        return known.group(0), True
+    for pat in ATTR_ENTITY:
+        m = pat.search(sent)
+        if m:
+            name = m.group(1).strip()
+            if name.split()[0].lower().strip(".,") not in NON_SOURCE:
+                return name, False
+    return None, False
 
 
 def get(path):
@@ -76,19 +125,22 @@ def sentences(story):
 
 
 def scan_story(story):
-    """Return [(source, figure, sentence)] for sentences carrying BOTH a market
-    figure and a recognised source. De-duped per (source, figure)."""
+    """Return [(source, figure, sentence, known)] for sentences carrying BOTH a
+    market figure and an attributed source — a curated one (known=True) OR a novel
+    one detected by attribution grammar (known=False). De-duped per (source, figure)."""
     hits, seen = [], set()
     for sent in sentences(story):
-        src = SRC_RE.search(sent)
-        if not src:
+        if not NUM_RE.search(sent):
+            continue
+        source, known = attributed_source(sent)
+        if not source:
             continue
         for num in NUM_RE.finditer(sent):
-            key = (src.group(0).lower(), num.group(0).lower())
+            key = (source.lower(), num.group(0).lower())
             if key in seen:
                 continue
             seen.add(key)
-            hits.append((src.group(0), num.group(1).strip(), sent.strip()))
+            hits.append((source, num.group(1).strip(), sent.strip(), known))
     return hits
 
 
@@ -124,9 +176,9 @@ def main():
         day = rows[0]["data"]
         day_hits = []
         for s in day.get("stories", []):
-            for src, fig, sent in scan_story(s):
+            for src, fig, sent, known in scan_story(s):
                 day_hits.append({"id": s.get("id"), "source": src, "figure": fig,
-                                 "market": s.get("market"), "sentence": sent})
+                                 "market": s.get("market"), "sentence": sent, "known": known})
         if day_hits:
             result[date] = day_hits
 
@@ -135,14 +187,21 @@ def main():
         return
 
     total = sum(len(v) for v in result.values())
+    novel = sorted({h["source"] for hits in result.values() for h in hits if not h["known"] and h["source"] != "?"})
     print(f"=== sourced market-stat citations: {total} across {len(result)} day(s) ===")
-    print("Register each RECURRING market series (reuse existing slugs); skip single-deal figures.\n")
+    print("Register each RECURRING market series (reuse existing slugs); skip single-deal figures.")
+    print("Rows marked ⚠ cite a source NOT in the curated list — treat them the same, and if a")
+    print("source recurs, add it to SOURCES in this script so it's auto-recognised next time.\n")
     for date, hits in result.items():
         print(f"— {date} —")
         for h in hits:
-            print(f"  [{h['source']}] {h['figure']}  ({h['market'] or '—'} · {h['id']})")
+            flag = "  " if h["known"] else "⚠ "
+            print(f"  {flag}[{h['source']}] {h['figure']}  ({h['market'] or '—'} · {h['id']})")
             print(f"      {h['sentence'][:180]}")
         print()
+    if novel:
+        print("⚠ unrecognised sources surfaced this run (promote recurring ones into SOURCES):")
+        print("   " + ", ".join(novel))
 
 
 if __name__ == "__main__":
