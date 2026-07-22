@@ -5,7 +5,7 @@
    History has no tab of its own — it's reached by tapping the masthead date. It still gets a hash route.
    Data lives in Supabase (public-read); the pipeline upserts via scripts/push_data.py. */
 
-const APP_VERSION = "v94";
+const APP_VERSION = "v95";
 const SUPABASE_URL = "https://uhwdnmbxiopfysodydty.supabase.co";
 const SUPABASE_KEY = "sb_publishable_LEQ5_-jjcRRl2p0wlaiXcw_RX4Wf8-y";
 // Mapbox public token — a pk.* token is meant to ship to browsers, but GitHub's
@@ -183,6 +183,8 @@ const state = {
   playerType: "people",   // "people" | "companies"
   playerSort: "active",   // "active" | "volume" | "az"
   playerQuery: "",
+  indexSeg: "people",     // Index tab segment: "people" | "companies" | "terms"
+  arcOpen: null,          // slug of the thread/canopy expanded inline on the Arcs page
   terms: null,         // slug -> term (dictionary)
   termCategory: null,  // null = all, otherwise a category label
   termSort: "az",       // "az" | "recent" | "mentions"
@@ -996,13 +998,16 @@ function route() {
   } else if ((m = h.match(/^#\/player\/([\w-]+)$/))) {
     showView("players");
     renderPlayerProfile(m[1]);
-  } else if (h === "#/players") {
+  } else if (h === "#/index" || h === "#/players") {
+    // the Index tab lands on People/Companies; Terms is one segment away
+    if (state.indexSeg === "terms") state.indexSeg = "people";
     showView("players");
     renderPlayers();
   } else if ((m = h.match(/^#\/term\/([\w-]+)$/))) {
     showView("dictionary");
     renderTermProfile(m[1]);
   } else if (h === "#/dictionary") {
+    state.indexSeg = "terms";
     showView("dictionary");
     renderDictionary();
   } else if (h === "#/history") {
@@ -1056,11 +1061,15 @@ function route() {
   else if (!chartOpening) requestAnimationFrame(() => window.scrollTo(0, keepY));
 }
 
+// Players + Dictionary now live under one "Index" tab, so their views light the
+// same tab (and their detail pages — profiles, term entries — keep it lit too).
+const VIEW_TO_TAB = { players: "index", dictionary: "index" };
 function showView(name) {
   for (const v of document.querySelectorAll(".view")) v.hidden = true;
   $(`view-${name}`).hidden = false;
+  const tabName = VIEW_TO_TAB[name] || name;
   for (const a of document.querySelectorAll(".tabs a")) {
-    a.classList.toggle("active", a.dataset.tab === name);
+    a.classList.toggle("active", a.dataset.tab === tabName);
   }
   $("date-nav").classList.toggle("off", name !== "briefing");
   // the masthead ticker is redundant on the Rates page itself
@@ -3700,7 +3709,7 @@ async function renderPlayers() {
   bar.className = "players-bar";
 
   const toggle = document.createElement("div");
-  toggle.className = "map-toggle";
+  toggle.className = "map-toggle index-seg";
   for (const [key, label, n] of [["people", "People", nPeople], ["companies", "Companies", all.length - nPeople]]) {
     const b = document.createElement("button");
     b.className = state.playerType === key ? "on" : "";
@@ -3712,6 +3721,11 @@ async function renderPlayers() {
     });
     toggle.appendChild(b);
   }
+  // third segment of the Index tab — jumps to the dictionary (Terms)
+  const termsBtn = document.createElement("button");
+  termsBtn.textContent = "Terms";
+  termsBtn.addEventListener("click", () => { state.indexSeg = "terms"; location.hash = "#/dictionary"; });
+  toggle.appendChild(termsBtn);
 
   const search = document.createElement("input");
   search.className = "player-search";
@@ -3949,6 +3963,22 @@ function termScore(t) {
 async function renderDictionary() {
   const wrap = $("dictionary-content");
   wrap.innerHTML = "";
+
+  // Index segment control — People / Companies jump back to the roster, Terms is here
+  const seg = document.createElement("div");
+  seg.className = "map-toggle index-seg index-seg-terms";
+  const segBtn = (label, on, go) => {
+    const b = document.createElement("button");
+    b.textContent = label;
+    if (on) b.className = "on";
+    b.addEventListener("click", go);
+    return b;
+  };
+  seg.appendChild(segBtn("People", false, () => { state.playerType = "people"; state.indexSeg = "people"; location.hash = "#/players"; }));
+  seg.appendChild(segBtn("Companies", false, () => { state.playerType = "companies"; state.indexSeg = "companies"; location.hash = "#/players"; }));
+  seg.appendChild(segBtn("Terms", true, () => {}));
+  wrap.appendChild(seg);
+
   const terms = await getTerms();
 
   if (!terms.size) {
@@ -6857,15 +6887,15 @@ function todayISO() {
   return new Date().toLocaleDateString("en-CA"); // local YYYY-MM-DD
 }
 
-/* --- Story threads (arcs) --- */
+/* --- Story arcs (threads + canopies) --- */
 async function renderThreads() {
   const wrap = $("threads-content");
   wrap.innerHTML = "";
-  wrap.appendChild(pageHead("Threads",
-    "Running storylines the briefing is tracking. Each links stories by a concrete shared spine — the same property, deal, lawsuit, or company event — never a vague theme."));
+  wrap.appendChild(pageHead("Arcs",
+    "Running storylines the briefing is tracking — the same property, deal, case, or company event, plus the agendas that group them. Tap any to open its timeline right here."));
   const [threads, campaigns] = await Promise.all([getThreads(), getCampaigns()]);
   if (!threads.length && !campaigns.length) {
-    wrap.appendChild(emptyPanel("No threads yet",
+    wrap.appendChild(emptyPanel("No arcs yet",
       "When two or more stories share a concrete anchor — the same building, deal, case, or company event — they connect into a timeline here."));
     return;
   }
@@ -6882,11 +6912,11 @@ async function renderThreads() {
   if (campaigns.length) {
     const sub = document.createElement("p");
     sub.className = "thread-group-head";
-    sub.textContent = "🌳 Canopies — several threads under one agenda";
+    sub.textContent = "🌳 Canopies — several arcs under one agenda";
     wrap.appendChild(sub);
     const clist = document.createElement("div");
-    clist.className = "thread-list";
-    for (const c of [...campaigns].sort(byRecency)) clist.appendChild(canopyCard(c, threadMap));
+    clist.className = "arc-list";
+    for (const c of [...campaigns].sort(byRecency)) clist.appendChild(arcItem("canopy", c, threadMap));
     wrap.appendChild(clist);
   }
 
@@ -6899,24 +6929,68 @@ async function renderThreads() {
     if (campaigns.length) {
       const sub = document.createElement("p");
       sub.className = "thread-group-head";
-      sub.textContent = "🧵 Threads";
+      sub.textContent = "🧵 Arcs";
       wrap.appendChild(sub);
     }
     const list = document.createElement("div");
-    list.className = "thread-list";
-    for (const t of loose) list.appendChild(threadCard(t));
+    list.className = "arc-list";
+    for (const t of loose) list.appendChild(arcItem("thread", t, threadMap));
     wrap.appendChild(list);
   }
 }
 
-/* A canopy summary card for the Threads index — reads like a thread card but
+/* An Arcs-index row: the summary card + a collapsible panel that expands its full
+   timeline IN PLACE (no navigation). Tap the card to open/close; only one is open
+   at a time. Hold-to-peek still works (the card keeps its data-peek). The panel is
+   visually inset and capped with a rule so the end of one arc is clearly distinct
+   from the start of the next. */
+function arcItem(kind, obj, threadMap) {
+  const item = document.createElement("div");
+  item.className = "arc-item";
+  const slug = obj.slug;
+  const card = kind === "canopy" ? canopyCard(obj, threadMap) : threadCard(obj);
+  const panel = document.createElement("div");
+  panel.className = "arc-expand";
+  const inner = document.createElement("div");
+  inner.className = "arc-expand-inner";
+  panel.appendChild(inner);
+  const caret = document.createElement("span");
+  caret.className = "arc-caret";
+  caret.textContent = "›";
+  card.querySelector(".thread-card-top")?.appendChild(caret);
+
+  let built = false;
+  const buildPanel = () => {
+    if (built) return;
+    built = true;
+    inner.appendChild(kind === "canopy" ? canopyBodyEl(obj, threadMap) : threadTimelineEl(obj));
+    // a full-page link keeps deep-linking / sharing available (nothing cut)
+    const more = document.createElement("a");
+    more.className = "arc-fullpage";
+    more.href = kind === "canopy" ? `#/campaign/${slug}` : `#/thread/${slug}`;
+    more.textContent = "Open full page ›";
+    more.addEventListener("click", (e) => e.stopPropagation());
+    inner.appendChild(more);
+  };
+  const setOpen = (open) => {
+    item.classList.toggle("open", open);
+    if (open) { buildPanel(); state.arcOpen = slug; }
+    else if (state.arcOpen === slug) state.arcOpen = null;
+  };
+  card.addEventListener("click", () => setOpen(!item.classList.contains("open")));
+
+  item.append(card, panel);
+  if (state.arcOpen === slug) setOpen(true); // survive a re-render with the same arc open
+  return item;
+}
+
+/* A canopy summary card for the Arcs index — reads like a thread card but
    counts its fronts (branches) and total stories, and wears the 🌳 mark. */
 function canopyCard(c, threadMap) {
   const btn = document.createElement("button");
   btn.className = "thread-card canopy-card";
   btn.dataset.peek = "canopy";
   btn.dataset.peekSlug = c.slug;
-  btn.addEventListener("click", () => { location.hash = `/campaign/${c.slug}`; });
   const top = document.createElement("div");
   top.className = "thread-card-top";
   const h = document.createElement("h3");
@@ -6943,7 +7017,6 @@ function threadCard(t) {
   btn.className = "thread-card";
   btn.dataset.peek = "thread";
   btn.dataset.peekSlug = t.slug;
-  btn.addEventListener("click", () => { location.hash = `/thread/${t.slug}`; });
   const top = document.createElement("div");
   top.className = "thread-card-top";
   const h = document.createElement("h3");
@@ -6988,7 +7061,13 @@ async function renderThread(slug) {
     wrap.appendChild(a);
   }
 
-  // entries are stored newest-first; a timeline reads oldest → newest
+  wrap.appendChild(threadTimelineEl(t));
+}
+
+/* The full timeline of a thread — reused by the detail page AND the inline
+   expansion on the Arcs index. Entries are stored newest-first; a timeline
+   reads oldest → newest. */
+function threadTimelineEl(t) {
   const entries = [...(t.entries || [])].sort((a, b) => (a.date || "").localeCompare(b.date || ""));
   const tl = document.createElement("div");
   tl.className = "timeline";
@@ -7022,7 +7101,7 @@ async function renderThread(slug) {
     row.append(dot, body);
     tl.appendChild(row);
   }
-  wrap.appendChild(tl);
+  return tl;
 }
 
 /* --- Canopies (agenda-level groupings above threads) --- */
@@ -7071,6 +7150,16 @@ async function renderCampaign(slug) {
   head.append(h, st);
   wrap.appendChild(head);
 
+  wrap.appendChild(canopyBodyEl(c, threadMap));
+}
+
+/* The full canopy body — driver, stats, through-line, branch mini-timelines, and
+   related threads. Reused by the detail page AND the inline expansion on the Arcs
+   index, so nothing is lost by expanding in place. */
+function canopyBodyEl(c, threadMap) {
+  const el = document.createElement("div");
+  el.className = "canopy-body";
+
   // Driver line — the named actor + bounded mandate that lets this canopy exist
   if (c.driver || c.mandate) {
     const d = document.createElement("p");
@@ -7083,7 +7172,7 @@ async function renderCampaign(slug) {
     }
     if (c.driver && c.mandate) d.appendChild(document.createTextNode(" · "));
     if (c.mandate) d.appendChild(document.createTextNode(c.mandate));
-    wrap.appendChild(d);
+    el.appendChild(d);
   }
 
   // Stat row — fronts / stories / opened / status
@@ -7097,7 +7186,7 @@ async function renderCampaign(slug) {
     statCell(ns, ns === 1 ? "Story" : "Stories") +
     statCell(c.createdAt ? formatDate(c.createdAt, { month: "short", day: "numeric" }) : "—", "Opened") +
     statCell(c.status === "resolved" ? "Resolved" : "Active", "Status");
-  wrap.appendChild(stats);
+  el.appendChild(stats);
 
   // The through-line — the meaning layer: why these fronts are one story
   if (c.throughLine) {
@@ -7108,7 +7197,7 @@ async function renderCampaign(slug) {
     tag.textContent = "The through-line · ";
     tl.appendChild(tag);
     tl.appendChild(document.createTextNode(decodeEntities(c.throughLine)));
-    wrap.appendChild(tl);
+    el.appendChild(tl);
   }
 
   // Branches — each a mini-timeline under its own header
@@ -7168,7 +7257,7 @@ async function renderCampaign(slug) {
       list.appendChild(row);
     }
     sec.appendChild(list);
-    wrap.appendChild(sec);
+    el.appendChild(sec);
   }
 
   // Related threads — visible but honestly labeled as NOT branches of the trunk
@@ -7177,12 +7266,17 @@ async function renderCampaign(slug) {
     const rh = document.createElement("p");
     rh.className = "thread-group-head";
     rh.textContent = "Related threads — adjacent, not part of the agenda";
-    wrap.appendChild(rh);
+    el.appendChild(rh);
     const rlist = document.createElement("div");
     rlist.className = "thread-list";
-    for (const t of related) rlist.appendChild(threadCard(t));
-    wrap.appendChild(rlist);
+    for (const t of related) {
+      const tc = threadCard(t);
+      tc.addEventListener("click", () => { location.hash = `/thread/${t.slug}`; });
+      rlist.appendChild(tc);
+    }
+    el.appendChild(rlist);
   }
+  return el;
 }
 
 /* --- Calendar (dated catalysts) --- */

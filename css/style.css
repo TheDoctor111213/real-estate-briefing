@@ -2548,6 +2548,28 @@ body.sheet-open, body.sheet-open * {
 .thread-anchor.big { font-size: 14px; margin: 6px 0 18px; }
 .thread-meta { color: var(--ink-3); font-size: 11.5px; margin-top: 8px; }
 
+/* Arcs index — rows that expand their timeline IN PLACE. An open row becomes one
+   unified card (summary + inset body), so its end is clearly distinct from the
+   next arc; a caret and an accent rule mark the boundary. */
+.arc-list { display: flex; flex-direction: column; gap: 10px; margin-bottom: 18px; }
+.arc-item { border-radius: 14px; transition: background 0.2s ease, box-shadow 0.2s ease; }
+.arc-item.open { background: var(--box); box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 22%, transparent), var(--card-shadow); }
+.arc-item.open .thread-card { background: transparent; box-shadow: none; border-radius: 14px 14px 0 0; }
+.arc-item.open .thread-card:active { transform: none; }
+.thread-card-top { align-items: center; }
+.thread-card-top h3 { flex: 1; }
+.arc-caret { color: var(--ink-3); font-size: 20px; line-height: 1; transition: transform 0.22s ease, color 0.2s ease; flex: none; }
+.arc-item.open .arc-caret { transform: rotate(90deg); color: var(--accent); }
+.arc-expand { display: grid; grid-template-rows: 0fr; transition: grid-template-rows 0.28s cubic-bezier(.3,.9,.3,1); }
+.arc-item.open .arc-expand { grid-template-rows: 1fr; }
+.arc-expand-inner { overflow: hidden; }
+.arc-item.open .arc-expand-inner { padding: 0 16px 16px; }
+.arc-expand-inner > .timeline,
+.arc-expand-inner > .canopy-body { border-top: 1px solid var(--rule); padding-top: 14px; margin-top: 2px; }
+.arc-expand-inner .canopy-body { margin: 0; }
+.arc-fullpage { display: inline-block; margin-top: 16px; font-size: 12.5px; font-weight: 600; color: var(--accent); text-decoration: none; }
+.arc-fullpage:active { opacity: 0.6; }
+
 .thread-status {
   flex: none;
   font-size: 10px;
