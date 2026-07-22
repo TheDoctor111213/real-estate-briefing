@@ -5,7 +5,7 @@
    History has no tab of its own — it's reached by tapping the masthead date. It still gets a hash route.
    Data lives in Supabase (public-read); the pipeline upserts via scripts/push_data.py. */
 
-const APP_VERSION = "v101";
+const APP_VERSION = "v102";
 const SUPABASE_URL = "https://uhwdnmbxiopfysodydty.supabase.co";
 const SUPABASE_KEY = "sb_publishable_LEQ5_-jjcRRl2p0wlaiXcw_RX4Wf8-y";
 // Mapbox public token — a pk.* token is meant to ship to browsers, but GitHub's
@@ -975,7 +975,10 @@ function smoothScrollIntoView(el) {
 let lastRouteHash = null;
 function route() {
   const sheet = $("sheet");
-  if (sheet && !sheet.hidden) closeSheet(); // a route change always drops the sheet
+  // a route change drops the sheet — UNLESS a fling-to-open is mid-flight (it
+  // navigates on purpose and owns its own upward-fade teardown; closeSheet here
+  // would reset the transform and snap the flung card back down)
+  if (sheet && !sheet.hidden && !sheetFlinging) closeSheet();
   const h = location.hash;
   // a re-render of the SAME view (opening a chart, an auto-refresh, a filter) must
   // hold your scroll position; only a real navigation to a different view resets it
@@ -5284,13 +5287,18 @@ function growFromCard(card, rect) {
     card.style.transition = "transform .19s cubic-bezier(.2,.84,.26,1), opacity .12s ease";
     card.style.transform = "scale(1)";
     card.style.opacity = "1";
-    setTimeout(() => {
+    growTimer = setTimeout(() => {
+      growTimer = null;
       if (sheetDragY !== null) return;   // a drag took over — let it own the transform
       card.style.transition = ""; card.style.transform = "";
       card.style.opacity = ""; card.style.transformOrigin = "";
     }, 280);
   });
 }
+// the grow-entrance's deferred cleanup, tracked so a drag/fling can CANCEL it —
+// otherwise it fires ~280ms in and resets the transform to rest, snapping a
+// flung-up card back down to its original height (the "bounce" bug)
+let growTimer = null;
 
 function closeSheet() {
   const sheet = $("sheet");
@@ -5317,7 +5325,14 @@ let peekFling = null;    // () => void: what a fling-up-to-open does (story→re
 let peekActive = false;  // true while a generic hold-peek owns the finger — other gesture handlers stand down
 let peekSwallowClick = false; // eat the synthetic click that a peek-release would otherwise fire on the pressed element
 
-function sheetDragStart(y) { sheetDragY = y; sheetDy = 0; }
+function sheetDragStart(y) {
+  // kill the grow-entrance cleanup so it can't reset the transform mid/post-drag,
+  // and neutralize its leftover scale/origin/opacity so the drag owns motion cleanly
+  if (growTimer) { clearTimeout(growTimer); growTimer = null; }
+  const c = $("sheet-card");
+  c.style.transition = "none"; c.style.opacity = "1"; c.style.transformOrigin = "";
+  sheetDragY = y; sheetDy = 0;
+}
 function sheetDragMove(y) {
   if (sheetDragY === null) return;
   sheetDy = y - sheetDragY;
@@ -5353,11 +5368,13 @@ function sheetDismiss() {
 // then let it hover over the new page), we CONTINUE the card upward from wherever
 // the finger left it and fade it out as the destination paints underneath — one
 // clean upward motion, no bounce, no lingering preview.
+let sheetFlinging = false; // true while a fling-to-open animation owns the sheet teardown
 function sheetFlingTo(hash) {
   const c = $("sheet-card"), sheet = $("sheet");
   peekFling = null; sheetDragY = null; sheetDy = 0;
+  sheetFlinging = true;                 // tell route() to keep its hands off the sheet
   c.style.transition = "transform .2s cubic-bezier(.32,.72,.24,1), opacity .18s ease";
-  c.style.transform = "translateY(-64px)";
+  c.style.transform = "translateY(-130px)"; // always UP from wherever the drag left it, then fade
   c.style.opacity = "0";
   sheet.classList.add("flinging");     // fast scrim fade (CSS)
   location.hash = hash;                 // destination renders under the fade
@@ -5366,6 +5383,7 @@ function sheetFlingTo(hash) {
     sheet.hidden = true;
     c.style.transition = ""; c.style.transform = ""; c.style.opacity = "";
     document.body.classList.remove("sheet-open");
+    sheetFlinging = false;
   }, 200);
 }
 
