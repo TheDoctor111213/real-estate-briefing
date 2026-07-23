@@ -5,7 +5,7 @@
    History has no tab of its own — it's reached by tapping the masthead date. It still gets a hash route.
    Data lives in Supabase (public-read); the pipeline upserts via scripts/push_data.py. */
 
-const APP_VERSION = "v103";
+const APP_VERSION = "v104";
 const SUPABASE_URL = "https://uhwdnmbxiopfysodydty.supabase.co";
 const SUPABASE_KEY = "sb_publishable_LEQ5_-jjcRRl2p0wlaiXcw_RX4Wf8-y";
 // Mapbox public token — a pk.* token is meant to ship to browsers, but GitHub's
@@ -1066,7 +1066,7 @@ function route() {
   else if (!chartOpening) requestAnimationFrame(() => window.scrollTo(0, keepY));
 }
 
-// Players + Dictionary now live under one "Index" tab, so their views light the
+// Players + Dictionary now live under one "Almanac" tab, so their views light the
 // same tab (and their detail pages — profiles, term entries — keep it lit too).
 const VIEW_TO_TAB = { players: "index", dictionary: "index" };
 function showView(name) {
