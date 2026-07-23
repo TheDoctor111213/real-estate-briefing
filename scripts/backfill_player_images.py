@@ -15,15 +15,16 @@ blank 16x16 favicon is rejected no matter its byte size, which was the old
 failure mode), uploads it to the Supabase `player-images` bucket, and points the
 player's `image` at the public URL.
 
-  Companies — candidates in priority order, first that passes wins:
-    1. the site's apple-touch-icon (a purpose-built square logo, ~120-512px)
-    2. unavatar.io (aggregates favicon/logo/clearbit-cache)
-    3. the largest declared <link rel=icon> on the site
-    4. Google s2 favicon @256 (last resort; often a generic globe, hence last)
+  Companies — every source is tried, the best-scoring passing candidate wins:
+    - the site's apple-touch-icon / largest declared <link rel=icon>
+    - icon.horse (serves a real 256px logo for most domains — the best live
+      source now that Clearbit's logo API is dead, which is why unavatar/Google
+      started returning blank tiles)
+    - unavatar.io, DuckDuckGo icons, Google s2 @256 (fallbacks)
   People — Wikipedia REST thumbnail, discovered via search and gated by a
   name+context keyword check so a namesake can't slip through.
 
-Quality gate: square-ish (aspect <= 1.6) AND min side >= 64px. Monograms remain
+Quality gate: square-ish (aspect <= 1.6) AND min side >= 48px. Monograms remain
 the honest fallback — most private real-estate people have no public headshot.
 Extend COMPANY_DOMAINS when a name doesn't map cleanly to its domain.
 """
@@ -194,8 +195,13 @@ def _company_logo(name, slug):
         return None
     # gather every real logo source, keep the best-scoring one that passes the gate
     # (apple-touch-icon, unavatar aggregate, declared favicons, Google @256 last)
+    # icon.horse serves a real 256px logo for most domains and is the best live
+    # replacement now that Clearbit's logo API (which unavatar leaned on) is dead —
+    # so unavatar/Google frequently return a blank tile. Try several; keep the best.
     sources = _site_icons(domain) + [
+        f"https://icon.horse/icon/{domain}",
         f"https://unavatar.io/{domain}?fallback=false",
+        f"https://icons.duckduckgo.com/ip3/{domain}.ico",
         f"https://www.google.com/s2/favicons?domain={domain}&sz=256",
     ]
     best = None
