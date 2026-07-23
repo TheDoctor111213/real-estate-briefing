@@ -5,7 +5,7 @@
    History has no tab of its own — it's reached by tapping the masthead date. It still gets a hash route.
    Data lives in Supabase (public-read); the pipeline upserts via scripts/push_data.py. */
 
-const APP_VERSION = "v106";
+const APP_VERSION = "v107";
 const SUPABASE_URL = "https://uhwdnmbxiopfysodydty.supabase.co";
 const SUPABASE_KEY = "sb_publishable_LEQ5_-jjcRRl2p0wlaiXcw_RX4Wf8-y";
 // Mapbox public token — a pk.* token is meant to ship to browsers, but GitHub's
@@ -5484,7 +5484,10 @@ async function openPlayerSheet(slug, originRect) {
   const players = await getPlayers();
   const p = players.get(slug);
   if (!p) { location.hash = `/player/${slug}`; return; }
-  const peekOpts = originRect ? { peek: true, originRect, onFling: () => sheetFlingTo(`/player/${slug}`) } : {};
+  // fling-up-to-open works whether the sheet was HELD (peek, grows from the card)
+  // or TAPPED (plain sheet) — either way a swipe up opens the full page
+  const flingPlayer = () => sheetFlingTo(`/player/${slug}`);
+  const peekOpts = originRect ? { peek: true, originRect, onFling: flingPlayer } : { onFling: flingPlayer };
   openSheet((card) => {
     const head = document.createElement("button");
     head.className = "sheet-head";
@@ -5564,7 +5567,8 @@ async function openTermSheet(slug, originRect) {
   const terms = await getTerms();
   const t = terms.get(slug);
   if (!t) { location.hash = `/term/${slug}`; return; }
-  const peekOpts = originRect ? { peek: true, originRect, onFling: () => sheetFlingTo(`/term/${slug}`) } : {};
+  const flingTerm = () => sheetFlingTo(`/term/${slug}`);
+  const peekOpts = originRect ? { peek: true, originRect, onFling: flingTerm } : { onFling: flingTerm };
   openSheet((card) => {
     const head = document.createElement("button");
     head.className = "sheet-head";
@@ -5604,7 +5608,8 @@ async function openThreadPeek(slug, originRect) {
   const threads = await getThreads();
   const t = threads.find((x) => x.slug === slug);
   if (!t) { location.hash = `/thread/${slug}`; return; }
-  const peekOpts = originRect ? { peek: true, originRect, onFling: () => sheetFlingTo(`/thread/${slug}`) } : {};
+  const flingThread = () => sheetFlingTo(`/thread/${slug}`);
+  const peekOpts = originRect ? { peek: true, originRect, onFling: flingThread } : { onFling: flingThread };
   openSheet((card) => {
     const head = document.createElement("button");
     head.className = "sheet-head";
@@ -5670,7 +5675,8 @@ async function openCanopyPeek(slug, originRect) {
   const c = campaigns.find((x) => x.slug === slug);
   if (!c) { location.hash = `/campaign/${slug}`; return; }
   const threadMap = new Map(threads.map((t) => [t.slug, t]));
-  const peekOpts = originRect ? { peek: true, originRect, onFling: () => sheetFlingTo(`/campaign/${slug}`) } : {};
+  const flingCanopy = () => sheetFlingTo(`/campaign/${slug}`);
+  const peekOpts = originRect ? { peek: true, originRect, onFling: flingCanopy } : { onFling: flingCanopy };
   openSheet((card) => {
     const head = document.createElement("button");
     head.className = "sheet-head";
