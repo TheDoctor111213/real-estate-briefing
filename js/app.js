@@ -5,7 +5,7 @@
    History has no tab of its own — it's reached by tapping the masthead date. It still gets a hash route.
    Data lives in Supabase (public-read); the pipeline upserts via scripts/push_data.py. */
 
-const APP_VERSION = "v107";
+const APP_VERSION = "v108";
 const SUPABASE_URL = "https://uhwdnmbxiopfysodydty.supabase.co";
 const SUPABASE_KEY = "sb_publishable_LEQ5_-jjcRRl2p0wlaiXcw_RX4Wf8-y";
 // Mapbox public token — a pk.* token is meant to ship to browsers, but GitHub's
@@ -467,7 +467,11 @@ async function init() {
     peekSwallowClick = false;
     if (e.touches.length !== 1) { gp = null; return; }
     const target = e.target;
-    if (target.closest?.(PEEK_SKIP)) { gp = null; return; }
+    // The reader is a skip-zone (its own scroll / pull-to-close own the finger),
+    // but the highlighted entity/term links INSIDE an article have no handler of
+    // their own — so let those hold-to-peek (and thus swipe-up-to-open) too.
+    const skipZone = target.closest?.(PEEK_SKIP);
+    if (skipZone && !(skipZone.id === "reader" && peekableEl(target))) { gp = null; return; }
     const el = peekableEl(target);
     if (!el) { gp = null; return; }
     const t = e.touches[0];
